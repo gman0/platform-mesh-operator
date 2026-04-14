@@ -1,0 +1,9 @@
+apiVersion: providers.platform-mesh.io/v1alpha1
+kind: Provider
+metadata:
+  labels:
+    app.kubernetes.io/name: platform-mesh-operator
+    app.kubernetes.io/managed-by: kustomize
+  name: provider-sample
+spec:
+  # TODO(user): Add fields here

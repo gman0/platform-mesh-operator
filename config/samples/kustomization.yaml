@@ -2,4 +2,5 @@
 resources:
 - core_v1alpha1_platform-mesh.yaml
 - providers_v1alpha1_managedprovider.yaml
+- providers_v1alpha1_provider.yaml
 # +kubebuilder:scaffold:manifestskustomizesamples

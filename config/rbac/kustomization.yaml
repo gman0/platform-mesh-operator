@@ -29,6 +29,9 @@ resources:
 # default, aiding admins in cluster management. Those roles are
 # not used by the platform-mesh-operator itself. You can comment the following lines
 # if you do not want those helpers be installed with your Project.
+- providers_provider_admin_role.yaml
+- providers_provider_editor_role.yaml
+- providers_provider_viewer_role.yaml
 - providers_managedprovider_admin_role.yaml
 - providers_managedprovider_editor_role.yaml
 - providers_managedprovider_viewer_role.yaml

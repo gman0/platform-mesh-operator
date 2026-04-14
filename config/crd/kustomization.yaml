@@ -4,6 +4,7 @@
 resources:
 - core.platform-mesh.io_platformmeshs.yaml
 - bases/providers.platform-mesh.io_managedproviders.yaml
+- bases/providers.platform-mesh.io_providers.yaml
 # +kubebuilder:scaffold:crdkustomizeresource
 
 patches:
