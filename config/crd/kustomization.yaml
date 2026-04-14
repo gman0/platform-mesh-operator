@@ -3,6 +3,7 @@
 # It should be run by config/default
 resources:
 - core.platform-mesh.io_platformmeshs.yaml
+- bases/providers.platform-mesh.io_managedproviders.yaml
 # +kubebuilder:scaffold:crdkustomizeresource
 
 patches:
