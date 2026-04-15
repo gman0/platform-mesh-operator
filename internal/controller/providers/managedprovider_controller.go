@@ -37,6 +37,7 @@ import (
 
 	providersv1alpha1 "github.com/platform-mesh/platform-mesh-operator/api/providers/v1alpha1"
 	"github.com/platform-mesh/platform-mesh-operator/internal/config"
+	pmsubroutines "github.com/platform-mesh/platform-mesh-operator/pkg/subroutines"
 	pmsubs "github.com/platform-mesh/platform-mesh-operator/pkg/subroutines/providers"
 )
 
@@ -73,11 +74,17 @@ func (r *ManagedProviderReconciler) SetupWithManager(mgr mcmanager.Manager, cfg 
 }
 
 func NewManagedProviderReconciler(mgr mcmanager.Manager, cfg *config.OperatorConfig, commonCfg *pmconfig.CommonServiceConfig) (*ManagedProviderReconciler, error) {
+	kcpUrl := fmt.Sprintf("https://%s-front-proxy.%s:%s", cfg.KCP.FrontProxyName, cfg.KCP.Namespace, cfg.KCP.FrontProxyPort)
+	if cfg.KCP.Url != "" {
+		kcpUrl = cfg.KCP.Url
+	}
+
 	localCl := mgr.GetLocalManager().GetClient()
+	kcpHelper := &pmsubroutines.Helper{}
 
 	var subs []subroutines.Subroutine
 	if cfg.Subroutines.ManagedProvider.Workspace.Enabled {
-		subs = append(subs, pmsubs.NewWorkspaceSubroutine(localCl))
+		subs = append(subs, pmsubs.NewWorkspaceSubroutine(localCl, kcpHelper, cfg, kcpUrl))
 	}
 	if cfg.Subroutines.ManagedProvider.ProviderResource.Enabled {
 		subs = append(subs, pmsubs.NewProviderResourceSubroutine(localCl))

@@ -18,37 +18,151 @@ package providers
 
 import (
 	"context"
+	"fmt"
+	"strings"
 
+	kcptenancyv1alpha "github.com/kcp-dev/kcp/sdk/apis/tenancy/v1alpha1"
+	gcerrors "github.com/platform-mesh/golang-commons/errors"
+	"github.com/platform-mesh/golang-commons/logger"
 	"github.com/platform-mesh/subroutines"
+	kerrors "k8s.io/apimachinery/pkg/api/errors"
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+	"k8s.io/apimachinery/pkg/runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+
+	providersv1alpha1 "github.com/platform-mesh/platform-mesh-operator/api/providers/v1alpha1"
+	"github.com/platform-mesh/platform-mesh-operator/internal/config"
+	pmsubs "github.com/platform-mesh/platform-mesh-operator/pkg/subroutines"
 )
 
-const WorkspaceSubroutineName = "WorkspaceSubroutine"
+const (
+	WorkspaceSubroutineName      = "WorkspaceSubroutine"
+	WorkspaceSubroutineFinalizer = "providers.platform-mesh.io/workspace-finalizer"
+	defaultWorkspaceParent       = "root:providers"
+	// providerWorkspaceTypeName and providerWorkspaceTypePath identify the
+	// "providers" WorkspaceType defined in manifests/kcp/workspace-type-providers.yaml,
+	// which is applied at root.
+	providerWorkspaceTypeName = "providers"
+	providerWorkspaceTypePath = "root"
+)
 
 // WorkspaceSubroutine creates the provider workspace in kcp under
-// :root:providers:<name> (or spec.workspacePath if set).
+// root:providers:<name> (or spec.workspacePath if set).
 type WorkspaceSubroutine struct {
-	client client.Client
+	client    client.Client
+	kcpHelper pmsubs.KcpHelper
+	cfg       *config.OperatorConfig
+	kcpUrl    string
 }
 
-func NewWorkspaceSubroutine(client client.Client) *WorkspaceSubroutine {
-	return &WorkspaceSubroutine{client: client}
+func NewWorkspaceSubroutine(cl client.Client, kcpHelper pmsubs.KcpHelper, cfg *config.OperatorConfig, kcpUrl string) *WorkspaceSubroutine {
+	return &WorkspaceSubroutine{
+		client:    cl,
+		kcpHelper: kcpHelper,
+		cfg:       cfg,
+		kcpUrl:    kcpUrl,
+	}
 }
 
 func (r *WorkspaceSubroutine) GetName() string {
 	return WorkspaceSubroutineName
 }
 
-func (r *WorkspaceSubroutine) Process(_ context.Context, _ client.Object) (subroutines.Result, error) {
-	// TODO: create provider workspace in kcp with the correct WorkspaceType
+func (r *WorkspaceSubroutine) Process(ctx context.Context, obj client.Object) (subroutines.Result, error) {
+	log := logger.LoadLoggerFromContext(ctx).ChildLogger("subroutine", r.GetName())
+	inst := obj.(*providersv1alpha1.ManagedProvider)
+
+	wsPath := workspacePath(inst)
+	parentPath, workspaceName, err := splitPath(wsPath)
+	if err != nil {
+		return subroutines.OK(), err
+	}
+
+	log.Debug().Str("parentPath", parentPath).Str("workspaceName", workspaceName).Msg("Ensuring provider workspace")
+
+	restCfg, err := pmsubs.BuildKcpAdminConfig(r.client, r.cfg, r.kcpUrl)
+	if err != nil {
+		return subroutines.OK(), gcerrors.Wrap(err, "failed to build kcp admin config")
+	}
+
+	k8sClient, err := r.kcpHelper.NewKcpClient(restCfg, parentPath)
+	if err != nil {
+		return subroutines.OK(), gcerrors.Wrap(err, "failed to create kcp client for parent workspace %s", parentPath)
+	}
+
+	ws := &kcptenancyv1alpha.Workspace{}
+	ws.APIVersion = kcptenancyv1alpha.SchemeGroupVersion.String()
+	ws.Kind = "Workspace"
+	ws.Name = workspaceName
+	ws.Spec.Type = &kcptenancyv1alpha.WorkspaceTypeReference{
+		Name: kcptenancyv1alpha.WorkspaceTypeName(providerWorkspaceTypeName),
+		Path: providerWorkspaceTypePath,
+	}
+
+	unstructuredWs, err := runtime.DefaultUnstructuredConverter.ToUnstructured(ws)
+	if err != nil {
+		return subroutines.OK(), gcerrors.Wrap(err, "failed to convert workspace to unstructured")
+	}
+	unstructuredObj := unstructured.Unstructured{Object: unstructuredWs}
+
+	err = k8sClient.Apply(ctx, client.ApplyConfigurationFromUnstructured(&unstructuredObj),
+		client.FieldOwner("platform-mesh-operator"), client.ForceOwnership)
+	if err != nil {
+		return subroutines.OK(), gcerrors.Wrap(err, "failed to apply workspace %s", wsPath)
+	}
+
+	log.Info().Str("workspace", wsPath).Msg("Ensured provider workspace")
 	return subroutines.OK(), nil
 }
 
-func (r *WorkspaceSubroutine) Finalize(_ context.Context, _ client.Object) (subroutines.Result, error) {
-	// TODO: delete workspace when spec.cleanupOnDelete is true
+func (r *WorkspaceSubroutine) Finalize(ctx context.Context, obj client.Object) (subroutines.Result, error) {
+	inst := obj.(*providersv1alpha1.ManagedProvider)
+	if !inst.Spec.CleanupOnDelete {
+		return subroutines.OK(), nil
+	}
+
+	log := logger.LoadLoggerFromContext(ctx).ChildLogger("subroutine", r.GetName())
+	wsPath := workspacePath(inst)
+	parentPath, workspaceName, err := splitPath(wsPath)
+	if err != nil {
+		return subroutines.OK(), err
+	}
+
+	restCfg, err := pmsubs.BuildKcpAdminConfig(r.client, r.cfg, r.kcpUrl)
+	if err != nil {
+		return subroutines.OK(), gcerrors.Wrap(err, "failed to build kcp admin config")
+	}
+
+	k8sClient, err := r.kcpHelper.NewKcpClient(restCfg, parentPath)
+	if err != nil {
+		return subroutines.OK(), gcerrors.Wrap(err, "failed to create kcp client for parent workspace %s", parentPath)
+	}
+
+	ws := &kcptenancyv1alpha.Workspace{}
+	ws.Name = workspaceName
+	if err = k8sClient.Delete(ctx, ws); err != nil && !kerrors.IsNotFound(err) {
+		return subroutines.OK(), gcerrors.Wrap(err, "failed to delete workspace %s", wsPath)
+	}
+
+	log.Info().Str("workspace", wsPath).Msg("Deleted provider workspace")
 	return subroutines.OK(), nil
 }
 
 func (r *WorkspaceSubroutine) Finalizers(_ client.Object) []string {
-	return []string{}
+	return []string{WorkspaceSubroutineFinalizer}
+}
+
+func workspacePath(inst *providersv1alpha1.ManagedProvider) string {
+	if inst.Spec.WorkspacePath != "" {
+		return inst.Spec.WorkspacePath
+	}
+	return fmt.Sprintf("%s:%s", defaultWorkspaceParent, inst.Name)
+}
+
+func splitPath(wsPath string) (parentPath, name string, err error) {
+	i := strings.LastIndex(wsPath, ":")
+	if i == -1 {
+		return "", "", fmt.Errorf("invalid workspace path %q: must be of the form parent:name", wsPath)
+	}
+	return wsPath[:i], wsPath[i+1:], nil
 }
