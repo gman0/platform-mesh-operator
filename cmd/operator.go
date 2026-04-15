@@ -35,6 +35,7 @@ import (
 	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
 
 	"github.com/platform-mesh/platform-mesh-operator/internal/controller"
+	"github.com/platform-mesh/platform-mesh-operator/internal/controller/providers"
 )
 
 var operatorCmd = &cobra.Command{
@@ -136,6 +137,12 @@ func RunController(_ *cobra.Command, _ []string) { // coverage-ignore
 	}
 	if err := resourceReconciler.SetupWithManager(mgr, defaultCfg); err != nil {
 		setupLog.Error(err, "unable to create controller", "controller", "PlatformMesh")
+		os.Exit(1)
+	}
+
+	managedProvidersReconciler := providers.ManagedProviderReconciler{}
+	if err := managedProvidersReconciler.SetupWithManager(mgr); err != nil {
+		setupLog.Error(err, "unable to create controller", "controller", "ManagedProvider")
 		os.Exit(1)
 	}
 

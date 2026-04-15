@@ -10,6 +10,7 @@ import (
 	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
 	ctrl "sigs.k8s.io/controller-runtime"
 
+	providers1alpha1 "github.com/platform-mesh/platform-mesh-operator/api/providers/v1alpha1"
 	corev1alpha1 "github.com/platform-mesh/platform-mesh-operator/api/v1alpha1"
 	"github.com/platform-mesh/platform-mesh-operator/internal/config"
 )
@@ -32,6 +33,8 @@ func init() {
 
 	utilruntime.Must(corev1alpha1.AddToScheme(scheme))
 	// +kubebuilder:scaffold:scheme
+
+	utilruntime.Must(providers1alpha1.AddToScheme(scheme))
 
 	rootCmd.AddCommand(operatorCmd)
 

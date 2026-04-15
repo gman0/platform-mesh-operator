@@ -1,6 +1,6 @@
 module github.com/platform-mesh/platform-mesh-operator
 
-go 1.25
+go 1.25.7
 
 replace ocm.software/open-component-model/kubernetes/controller => github.com/open-component-model/open-component-model/kubernetes/controller v0.0.0-20260311125053-bd5709c8d5dd
 
