@@ -17,57 +17,101 @@ limitations under the License.
 package v1alpha1
 
 import (
+	apiextensionsv1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
-// EDIT THIS FILE!  THIS IS SCAFFOLDING FOR YOU TO OWN!
-// NOTE: json tags are required.  Any new fields you add must have json tags for the fields to be serialized.
-
-// ManagedProviderSpec defines the desired state of ManagedProvider
+// ManagedProviderSpec defines the desired state of ManagedProvider.
+// ManagedProvider is a runtime-cluster resource that orchestrates the full
+// provider lifecycle: workspace creation, Provider bootstrap, secret copy,
+// and workload deployment.
 type ManagedProviderSpec struct {
-	// INSERT ADDITIONAL SPEC FIELDS - desired state of cluster
-	// Important: Run "make" to regenerate code after modifying this file
-	// The following markers will use OpenAPI v3 schema to validate the value
-	// More info: https://book.kubebuilder.io/reference/markers/crd-validation.html
-
-	// foo is an example field of ManagedProvider. Edit managedprovider_types.go to remove/update
+	// workspacePath is the full kcp logical path for the provider workspace.
+	// Defaults to root:providers:<name> when omitted.
 	// +optional
-	Foo *string `json:"foo,omitempty"`
+	WorkspacePath string `json:"workspacePath,omitempty"`
+
+	// controller defines the OCM component to deploy as the provider controller.
+	// +required
+	Controller ProviderComponentSpec `json:"controller"`
+
+	// portal defines the OCM component to deploy as the provider portal.
+	// +optional
+	Portal *ProviderComponentSpec `json:"portal,omitempty"`
+
+	// cleanupOnDelete removes the kcp workspace when the ManagedProvider is deleted.
+	// +optional
+	CleanupOnDelete bool `json:"cleanupOnDelete,omitempty"`
+}
+
+// ProviderComponentSpec references an OCM component to deploy.
+type ProviderComponentSpec struct {
+	// ocm identifies the component in an OCM registry.
+	// +required
+	OCM OCMComponentSpec `json:"ocm"`
+}
+
+// OCMComponentSpec identifies a component in an OCM registry.
+type OCMComponentSpec struct {
+	// componentName is the fully-qualified OCM component name.
+	// +required
+	ComponentName string `json:"componentName"`
+
+	// version is the component version to deploy.
+	// +required
+	Version string `json:"version"`
+
+	// registry is the OCM registry host (e.g. ghcr.io/platform-mesh/ocm).
+	// +required
+	Registry string `json:"registry"`
+
+	// values are Helm values passed to the deployed chart.
+	// +optional
+	Values apiextensionsv1.JSON `json:"values,omitempty"`
 }
 
 // ManagedProviderStatus defines the observed state of ManagedProvider.
 type ManagedProviderStatus struct {
-	// INSERT ADDITIONAL STATUS FIELD - define observed state of cluster
-	// Important: Run "make" to regenerate code after modifying this file
+	// phase summarises the overall lifecycle state of the ManagedProvider.
+	// +optional
+	Phase string `json:"phase,omitempty"`
 
-	// For Kubernetes API conventions, see:
-	// https://github.com/kubernetes/community/blob/master/contributors/devel/sig-architecture/api-conventions.md#typical-status-properties
+	// kubeconfigSecretRef points to the Secret in the runtime namespace that
+	// contains the scoped kubeconfig copied from the provider kcp workspace.
+	// +optional
+	KubeconfigSecretRef *LocalSecretReference `json:"kubeconfigSecretRef,omitempty"`
 
 	// conditions represent the current state of the ManagedProvider resource.
-	// Each condition has a unique type and reflects the status of a specific aspect of the resource.
-	//
-	// Standard condition types include:
-	// - "Available": the resource is fully functional
-	// - "Progressing": the resource is being created or updated
-	// - "Degraded": the resource failed to reach or maintain its desired state
-	//
-	// The status of each condition is one of True, False, or Unknown.
 	// +listType=map
 	// +listMapKey=type
 	// +optional
 	Conditions []metav1.Condition `json:"conditions,omitempty"`
+
+	// observedGeneration is the last generation reconciled by the controller.
+	// +optional
+	ObservedGeneration int64 `json:"observedGeneration,omitempty"`
+}
+
+// LocalSecretReference is a reference to a Secret in the same namespace.
+type LocalSecretReference struct {
+	// name is the Secret name.
+	// +required
+	Name string `json:"name"`
 }
 
 // +kubebuilder:object:root=true
 // +kubebuilder:subresource:status
+// +kubebuilder:printcolumn:JSONPath=".status.phase",name="Phase",type=string,description="Overall lifecycle phase"
+// +kubebuilder:printcolumn:JSONPath=".status.conditions[?(@.type=='Ready')].status",name="Ready",type=string,description="Shows if resource is ready"
 
-// ManagedProvider is the Schema for the managedproviders API
+// ManagedProvider is the Schema for the managedproviders API.
+// It orchestrates the full provider lifecycle from the runtime cluster side.
 type ManagedProvider struct {
 	metav1.TypeMeta `json:",inline"`
 
 	// metadata is a standard object metadata
 	// +optional
-	metav1.ObjectMeta `json:"metadata,omitzero"`
+	metav1.ObjectMeta `json:"metadata,omitempty"`
 
 	// spec defines the desired state of ManagedProvider
 	// +required
@@ -75,7 +119,7 @@ type ManagedProvider struct {
 
 	// status defines the observed state of ManagedProvider
 	// +optional
-	Status ManagedProviderStatus `json:"status,omitzero"`
+	Status ManagedProviderStatus `json:"status,omitempty"`
 }
 
 // +kubebuilder:object:root=true
@@ -83,10 +127,18 @@ type ManagedProvider struct {
 // ManagedProviderList contains a list of ManagedProvider
 type ManagedProviderList struct {
 	metav1.TypeMeta `json:",inline"`
-	metav1.ListMeta `json:"metadata,omitzero"`
+	metav1.ListMeta `json:"metadata,omitempty"`
 	Items           []ManagedProvider `json:"items"`
 }
 
 func init() {
 	SchemeBuilder.Register(&ManagedProvider{}, &ManagedProviderList{})
+}
+
+func (i *ManagedProvider) GetConditions() []metav1.Condition {
+	return i.Status.Conditions
+}
+
+func (i *ManagedProvider) SetConditions(conditions []metav1.Condition) {
+	i.Status.Conditions = conditions
 }
