@@ -42,7 +42,7 @@ const (
 	// providerWorkspaceTypeName and providerWorkspaceTypePath identify the
 	// "providers" WorkspaceType defined in manifests/kcp/workspace-type-providers.yaml,
 	// which is applied at root.
-	providerWorkspaceTypeName = "providers"
+	providerWorkspaceTypeName = "provider"
 	providerWorkspaceTypePath = "root"
 )
 
@@ -89,6 +89,8 @@ func (r *WorkspaceSubroutine) Process(ctx context.Context, obj client.Object) (s
 	if err != nil {
 		return subroutines.OK(), gcerrors.Wrap(err, "failed to create kcp client for parent workspace %s", parentPath)
 	}
+
+	fmt.Printf("\n\n\n### kcpUrl=%q \n\n\n", r.kcpUrl)
 
 	ws := &kcptenancyv1alpha.Workspace{}
 	ws.APIVersion = kcptenancyv1alpha.SchemeGroupVersion.String()

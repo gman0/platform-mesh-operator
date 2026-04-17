@@ -24,4 +24,4 @@ rules:
   resources:
   - managedproviders/status
   verbs:
-  - get
+  - '*'
