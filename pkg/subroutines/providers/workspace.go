@@ -42,8 +42,10 @@ const (
 	// providerWorkspaceTypeName and providerWorkspaceTypePath identify the
 	// "providers" WorkspaceType defined in manifests/kcp/workspace-type-providers.yaml,
 	// which is applied at root.
-	providerWorkspaceTypeName = "provider"
-	providerWorkspaceTypePath = "root"
+	providerWorkspaceTypeName      = "provider"
+	providerWorkspaceTypePath      = "root"
+	providersRootWorkspaceTypeName = "providers"
+	providersRootWorkspaceTypePath = "root"
 )
 
 // WorkspaceSubroutine creates the provider workspace in kcp under
@@ -90,31 +92,39 @@ func (r *WorkspaceSubroutine) Process(ctx context.Context, obj client.Object) (s
 		return subroutines.OK(), gcerrors.Wrap(err, "failed to create kcp client for parent workspace %s", parentPath)
 	}
 
-	fmt.Printf("\n\n\n### kcpUrl=%q \n\n\n", r.kcpUrl)
+	if err := applyWorkspace(ctx, k8sClient,
+		workspaceName, wsPath,
+		providerWorkspaceTypeName, providerWorkspaceTypePath,
+	); err != nil {
+		return subroutines.Result{}, err
+	}
 
+	log.Info().Str("workspace", wsPath).Msg("Ensured provider workspace")
+	return subroutines.OK(), nil
+}
+
+func applyWorkspace(ctx context.Context, k8sClient client.Client, name, path string, typeName kcptenancyv1alpha.WorkspaceTypeName, typePath string) error {
 	ws := &kcptenancyv1alpha.Workspace{}
 	ws.APIVersion = kcptenancyv1alpha.SchemeGroupVersion.String()
 	ws.Kind = "Workspace"
-	ws.Name = workspaceName
+	ws.Name = name
 	ws.Spec.Type = &kcptenancyv1alpha.WorkspaceTypeReference{
-		Name: kcptenancyv1alpha.WorkspaceTypeName(providerWorkspaceTypeName),
-		Path: providerWorkspaceTypePath,
+		Name: typeName,
+		Path: typePath,
 	}
 
 	unstructuredWs, err := runtime.DefaultUnstructuredConverter.ToUnstructured(ws)
 	if err != nil {
-		return subroutines.OK(), gcerrors.Wrap(err, "failed to convert workspace to unstructured")
+		return gcerrors.Wrap(err, "failed to convert workspace to unstructured")
 	}
 	unstructuredObj := unstructured.Unstructured{Object: unstructuredWs}
 
 	err = k8sClient.Apply(ctx, client.ApplyConfigurationFromUnstructured(&unstructuredObj),
 		client.FieldOwner("platform-mesh-operator"), client.ForceOwnership)
 	if err != nil {
-		return subroutines.OK(), gcerrors.Wrap(err, "failed to apply workspace %s", wsPath)
+		return gcerrors.Wrap(err, "failed to apply workspace %s", path)
 	}
-
-	log.Info().Str("workspace", wsPath).Msg("Ensured provider workspace")
-	return subroutines.OK(), nil
+	return nil
 }
 
 func (r *WorkspaceSubroutine) Finalize(ctx context.Context, obj client.Object) (subroutines.Result, error) {

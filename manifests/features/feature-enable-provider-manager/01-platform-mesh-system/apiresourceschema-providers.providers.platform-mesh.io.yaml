@@ -2,10 +2,8 @@ apiVersion: apis.kcp.io/v1alpha1
 kind: APIResourceSchema
 metadata:
   creationTimestamp: null
-  name: today.providers.providers.platform-mesh.io
+  name: v260420-70fe3bd.providers.providers.platform-mesh.io
 spec:
-  conversion:
-    strategy: None
   group: providers.platform-mesh.io
   names:
     kind: Provider
@@ -152,5 +150,3 @@ spec:
     storage: true
     subresources:
       status: {}
-
----
