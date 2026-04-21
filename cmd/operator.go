@@ -117,8 +117,6 @@ func RunController(_ *cobra.Command, _ []string) { // coverage-ignore
 	}
 	multiProvider.AddProvider("platform-mesh-runtime", single.New("platform-mesh-runtime", platformMeshRuntimeCluster))
 
-	// providersAPIExportProvider
-
 	mgr, err := mcmanager.New(restCfg, multiProvider, mcmanager.Options{
 		Scheme: scheme,
 		Metrics: metricsserver.Options{
