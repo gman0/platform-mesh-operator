@@ -18,19 +18,35 @@ package providers
 
 import (
 	"context"
+	"fmt"
 
-	"k8s.io/apimachinery/pkg/runtime"
+	pmconfig "github.com/platform-mesh/golang-commons/config"
+	"github.com/platform-mesh/golang-commons/controller/filter"
+	"github.com/platform-mesh/golang-commons/controller/lifecycle/ratelimiter"
+	"github.com/platform-mesh/subroutines"
+	"github.com/platform-mesh/subroutines/conditions"
+	"github.com/platform-mesh/subroutines/lifecycle"
+	"k8s.io/client-go/util/workqueue"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
-	logf "sigs.k8s.io/controller-runtime/pkg/log"
+	"sigs.k8s.io/controller-runtime/pkg/controller"
+	"sigs.k8s.io/controller-runtime/pkg/predicate"
+	mcbuilder "sigs.k8s.io/multicluster-runtime/pkg/builder"
+	mcmanager "sigs.k8s.io/multicluster-runtime/pkg/manager"
+	mcreconcile "sigs.k8s.io/multicluster-runtime/pkg/reconcile"
 
 	providersv1alpha1 "github.com/platform-mesh/platform-mesh-operator/api/providers/v1alpha1"
+	"github.com/platform-mesh/platform-mesh-operator/internal/config"
+	pmsubroutines "github.com/platform-mesh/platform-mesh-operator/pkg/subroutines"
+	pmsubs "github.com/platform-mesh/platform-mesh-operator/pkg/subroutines/providers"
 )
+
+const ProviderControllerName = "ProviderReconciler"
 
 // ProviderReconciler reconciles a Provider object
 type ProviderReconciler struct {
-	client.Client
-	Scheme *runtime.Scheme
+	lifecycle   *lifecycle.Lifecycle
+	rateLimiter workqueue.TypedRateLimiter[mcreconcile.Request]
 }
 
 // +kubebuilder:rbac:groups=providers.platform-mesh.io,resources=providers,verbs=get;list;watch;create;update;patch;delete
@@ -46,18 +62,63 @@ type ProviderReconciler struct {
 //
 // For more details, check Reconcile and its Result here:
 // - https://pkg.go.dev/sigs.k8s.io/controller-runtime@v0.23.3/pkg/reconcile
-func (r *ProviderReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
-	_ = logf.FromContext(ctx)
-
-	// TODO(user): your logic here
-
-	return ctrl.Result{}, nil
+func (r *ProviderReconciler) Reconcile(ctx context.Context, req mcreconcile.Request) (ctrl.Result, error) {
+	return r.lifecycle.Reconcile(ctx, req)
 }
 
 // SetupWithManager sets up the controller with the Manager.
-func (r *ProviderReconciler) SetupWithManager(mgr ctrl.Manager) error {
-	return ctrl.NewControllerManagedBy(mgr).
-		For(&providersv1alpha1.Provider{}).
-		Named("providers-provider").
+func (r *ProviderReconciler) SetupWithManager(mgr mcmanager.Manager, cfg *pmconfig.CommonServiceConfig,
+	eventPredicates ...predicate.Predicate) error {
+	opts := controller.TypedOptions[mcreconcile.Request]{
+		MaxConcurrentReconciles: cfg.MaxConcurrentReconciles,
+		RateLimiter:             r.rateLimiter,
+	}
+	predicates := append([]predicate.Predicate{filter.DebugResourcesBehaviourPredicate(cfg.DebugLabelValue)}, eventPredicates...)
+	return mcbuilder.ControllerManagedBy(mgr).
+		Named(ManagedProviderControllerName).
+		For(&providersv1alpha1.ManagedProvider{}).
+		WithOptions(opts).
+		WithEventFilter(predicate.And(predicates...)).
 		Complete(r)
+}
+
+func NewProviderReconciler(mgr mcmanager.Manager, cfg *config.OperatorConfig, commonCfg *pmconfig.CommonServiceConfig) (*ProviderReconciler, error) {
+	kcpUrl := fmt.Sprintf("https://%s-front-proxy.%s:%s", cfg.KCP.FrontProxyName, cfg.KCP.Namespace, cfg.KCP.FrontProxyPort)
+	if cfg.KCP.Url != "" {
+		kcpUrl = cfg.KCP.Url
+	}
+
+	localCl := mgr.GetLocalManager().GetClient()
+	kcpHelper := &pmsubroutines.Helper{}
+
+	var subs []subroutines.Subroutine
+	if cfg.Subroutines.ManagedProvider.Workspace.Enabled {
+		subs = append(subs, pmsubs.NewWorkspaceSubroutine(localCl, kcpHelper, cfg, kcpUrl))
+	}
+	if cfg.Subroutines.ManagedProvider.ProviderResource.Enabled {
+		subs = append(subs, pmsubs.NewProviderResourceSubroutine(localCl))
+	}
+	if cfg.Subroutines.ManagedProvider.WaitProvider.Enabled {
+		subs = append(subs, pmsubs.NewWaitProviderSubroutine(localCl))
+	}
+	if cfg.Subroutines.ManagedProvider.KubeconfigCopy.Enabled {
+		subs = append(subs, pmsubs.NewKubeconfigCopySubroutine(localCl))
+	}
+	if cfg.Subroutines.ManagedProvider.Deploy.Enabled {
+		subs = append(subs, pmsubs.NewDeploySubroutine(localCl))
+	}
+
+	rl, err := ratelimiter.NewStaticThenExponentialRateLimiter[mcreconcile.Request](ratelimiter.NewConfig())
+	if err != nil {
+		return nil, fmt.Errorf("creating rate limiter: %w", err)
+	}
+
+	lc := lifecycle.New(mgr, ProviderControllerName, func() client.Object {
+		return &providersv1alpha1.Provider{}
+	}, subs...).WithConditions(conditions.NewManager())
+
+	return &ProviderReconciler{
+		lifecycle:   lc,
+		rateLimiter: rl,
+	}, nil
 }

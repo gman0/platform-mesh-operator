@@ -141,6 +141,9 @@ tasks:
             {{.LOCAL_BIN}}/apigen --input-dir {{.CRD_DIRECTORY}}/apigen/crd --output-dir {{.CRD_DIRECTORY}}/apigen/out
             mv {{.CRD_DIRECTORY}}/apigen/out/apiexport-providers.platform-mesh.io.yaml ./manifests/features/feature-enable-provider-manager/01-platform-mesh-system
             mv {{.CRD_DIRECTORY}}/apigen/out/apiresourceschema-providers.providers.platform-mesh.io.yaml ./manifests/features/feature-enable-provider-manager/01-platform-mesh-system
+            # Merge permission claims into the generated Providers APIExport.
+            yq -i '. *= load("./manifests/features/feature-enable-provider-manager/permission-claims-patch.yamlpatch")' \
+              ./manifests/features/feature-enable-provider-manager/01-platform-mesh-system/apiexport-providers.platform-mesh.io.yaml
             # Cleanup.
             [ -d {{.CRD_DIRECTORY}} ] && rm -rf {{.CRD_DIRECTORY}}/apigen || exit 1
         ignore_error: false

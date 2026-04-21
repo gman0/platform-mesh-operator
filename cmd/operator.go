@@ -27,13 +27,17 @@ import (
 	_ "k8s.io/client-go/plugin/pkg/client/auth"
 	"k8s.io/client-go/rest"
 	ctrl "sigs.k8s.io/controller-runtime"
+	"sigs.k8s.io/controller-runtime/pkg/cluster"
 	"sigs.k8s.io/controller-runtime/pkg/healthz"
 	metricsserver "sigs.k8s.io/controller-runtime/pkg/metrics/server"
 	mcmanager "sigs.k8s.io/multicluster-runtime/pkg/manager"
+	"sigs.k8s.io/multicluster-runtime/providers/multi"
+	"sigs.k8s.io/multicluster-runtime/providers/single"
 
 	"github.com/platform-mesh/golang-commons/traces"
 	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
 
+	"github.com/kcp-dev/multicluster-provider/apiexport"
 	"github.com/platform-mesh/platform-mesh-operator/internal/controller"
 	"github.com/platform-mesh/platform-mesh-operator/internal/controller/providers"
 )
@@ -99,7 +103,23 @@ func RunController(_ *cobra.Command, _ []string) { // coverage-ignore
 		}
 	}
 
-	mgr, err := mcmanager.New(restCfg, nil, mcmanager.Options{
+	multiProvider := multi.New(multi.Options{})
+
+	platformMeshRuntimeCluster, err := cluster.New(
+		restCfg,
+		func(o *cluster.Options) {
+			o.Scheme = scheme
+		},
+	)
+	if err != nil {
+		setupLog.Error(err, "unable to start manager")
+		os.Exit(1)
+	}
+	multiProvider.AddProvider("platform-mesh-runtime", single.New("platform-mesh-runtime", platformMeshRuntimeCluster))
+
+	// providersAPIExportProvider
+
+	mgr, err := mcmanager.New(restCfg, multiProvider, mcmanager.Options{
 		Scheme: scheme,
 		Metrics: metricsserver.Options{
 			BindAddress:   defaultCfg.Metrics.BindAddress,
