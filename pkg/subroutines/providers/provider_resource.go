@@ -19,8 +19,17 @@ package providers
 import (
 	"context"
 
+	gcerrors "github.com/platform-mesh/golang-commons/errors"
+	"github.com/platform-mesh/golang-commons/logger"
 	"github.com/platform-mesh/subroutines"
+	kerrors "k8s.io/apimachinery/pkg/api/errors"
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+	"k8s.io/apimachinery/pkg/runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+
+	providersv1alpha1 "github.com/platform-mesh/platform-mesh-operator/api/providers/v1alpha1"
+	"github.com/platform-mesh/platform-mesh-operator/internal/config"
+	pmsubs "github.com/platform-mesh/platform-mesh-operator/pkg/subroutines"
 )
 
 const ProviderResourceSubroutineName = "ProviderResourceSubroutine"
@@ -29,24 +38,108 @@ const ProviderResourceSubroutineName = "ProviderResourceSubroutine"
 // workspace, triggering the Provider controller to bootstrap SA, RBAC, and the
 // kubeconfig Secret on the kcp side.
 type ProviderResourceSubroutine struct {
-	client client.Client
+	client    client.Client
+	kcpHelper pmsubs.KcpHelper
+	cfg       *config.OperatorConfig
+	kcpUrl    string
 }
 
-func NewProviderResourceSubroutine(client client.Client) *ProviderResourceSubroutine {
-	return &ProviderResourceSubroutine{client: client}
+func NewProviderResourceSubroutine(cl client.Client, kcpHelper pmsubs.KcpHelper, cfg *config.OperatorConfig, kcpUrl string) *ProviderResourceSubroutine {
+	return &ProviderResourceSubroutine{
+		client:    cl,
+		kcpHelper: kcpHelper,
+		cfg:       cfg,
+		kcpUrl:    kcpUrl,
+	}
 }
 
 func (r *ProviderResourceSubroutine) GetName() string {
 	return ProviderResourceSubroutineName
 }
 
-func (r *ProviderResourceSubroutine) Process(_ context.Context, _ client.Object) (subroutines.Result, error) {
-	// TODO: create Provider resource in the provider workspace
+func (r *ProviderResourceSubroutine) Process(ctx context.Context, obj client.Object) (subroutines.Result, error) {
+	log := logger.LoadLoggerFromContext(ctx).ChildLogger("subroutine", r.GetName())
+	inst := obj.(*providersv1alpha1.ManagedProvider)
+
+	wsPath := workspacePath(inst)
+	parentPath, workspaceName, err := splitPath(wsPath)
+	if err != nil {
+		return subroutines.OK(), err
+	}
+
+	log.Debug().Str("parentPath", parentPath).Str("workspaceName", workspaceName).Msg("Ensuring provider workspace")
+
+	restCfg, err := pmsubs.BuildKcpAdminConfig(r.client, &r.cfg.KCP, r.kcpUrl)
+	if err != nil {
+		return subroutines.OK(), gcerrors.Wrap(err, "failed to build kcp admin config")
+	}
+
+	scopedKubeClient, err := r.kcpHelper.NewKcpClient(restCfg, parentPath)
+	if err != nil {
+		return subroutines.OK(), gcerrors.Wrap(err, "failed to create kcp client for parent workspace %s", parentPath)
+	}
+
+	if err := applyProvider(ctx, scopedKubeClient, inst.Name, func(p *providersv1alpha1.Provider) {
+		p.Spec.HostOverride = "" // TODO
+	}); err != nil {
+		return subroutines.Result{}, err
+	}
+
+	log.Info().Str("workspace", wsPath).Msg("Ensured provider workspace")
 	return subroutines.OK(), nil
 }
 
-func (r *ProviderResourceSubroutine) Finalize(_ context.Context, _ client.Object) (subroutines.Result, error) {
-	// TODO: delete Provider resource on teardown
+func applyProvider(ctx context.Context, scopedKubeClient client.Client, name string, patch func(*providersv1alpha1.Provider)) error {
+	provider := &providersv1alpha1.Provider{}
+	provider.APIVersion = providersv1alpha1.SchemeGroupVersion.String()
+	provider.Kind = "Provider"
+	provider.Name = name
+	patch(provider)
+
+	u, err := runtime.DefaultUnstructuredConverter.ToUnstructured(provider)
+	if err != nil {
+		return gcerrors.Wrap(err, "failed to convert Provider to unstructured")
+	}
+	uObj := unstructured.Unstructured{Object: u}
+
+	err = scopedKubeClient.Apply(ctx, client.ApplyConfigurationFromUnstructured(&uObj),
+		client.FieldOwner("platform-mesh-operator"), client.ForceOwnership)
+	if err != nil {
+		return gcerrors.Wrap(err, "failed to apply provider %s", name)
+	}
+	return nil
+}
+
+func (r *ProviderResourceSubroutine) Finalize(ctx context.Context, obj client.Object) (subroutines.Result, error) {
+	inst := obj.(*providersv1alpha1.ManagedProvider)
+	if !inst.Spec.CleanupOnDelete {
+		return subroutines.OK(), nil
+	}
+
+	log := logger.LoadLoggerFromContext(ctx).ChildLogger("subroutine", r.GetName())
+	wsPath := workspacePath(inst)
+	parentPath, _, err := splitPath(wsPath)
+	if err != nil {
+		return subroutines.OK(), err
+	}
+
+	restCfg, err := pmsubs.BuildKcpAdminConfig(r.client, &r.cfg.KCP, r.kcpUrl)
+	if err != nil {
+		return subroutines.OK(), gcerrors.Wrap(err, "failed to build kcp admin config")
+	}
+
+	scopedKubeClient, err := r.kcpHelper.NewKcpClient(restCfg, parentPath)
+	if err != nil {
+		return subroutines.OK(), gcerrors.Wrap(err, "failed to create kcp client for parent workspace %s", parentPath)
+	}
+
+	provider := &providersv1alpha1.Provider{}
+	provider.Name = inst.Name
+	if err = scopedKubeClient.Delete(ctx, provider); err != nil && !kerrors.IsNotFound(err) {
+		return subroutines.OK(), gcerrors.Wrap(err, "failed to delete provider %s", provider.Name)
+	}
+
+	log.Info().Str("workspace", wsPath).Msg("Deleted provider")
 	return subroutines.OK(), nil
 }
 

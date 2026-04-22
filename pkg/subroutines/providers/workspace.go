@@ -87,12 +87,12 @@ func (r *WorkspaceSubroutine) Process(ctx context.Context, obj client.Object) (s
 		return subroutines.OK(), gcerrors.Wrap(err, "failed to build kcp admin config")
 	}
 
-	k8sClient, err := r.kcpHelper.NewKcpClient(restCfg, parentPath)
+	scopedKubeClient, err := r.kcpHelper.NewKcpClient(restCfg, parentPath)
 	if err != nil {
 		return subroutines.OK(), gcerrors.Wrap(err, "failed to create kcp client for parent workspace %s", parentPath)
 	}
 
-	if err := applyWorkspace(ctx, k8sClient,
+	if err := applyWorkspace(ctx, scopedKubeClient,
 		workspaceName, wsPath,
 		providerWorkspaceTypeName, providerWorkspaceTypePath,
 	); err != nil {
@@ -103,7 +103,7 @@ func (r *WorkspaceSubroutine) Process(ctx context.Context, obj client.Object) (s
 	return subroutines.OK(), nil
 }
 
-func applyWorkspace(ctx context.Context, k8sClient client.Client, name, path string, typeName kcptenancyv1alpha.WorkspaceTypeName, typePath string) error {
+func applyWorkspace(ctx context.Context, scopedKubeClient client.Client, name, path string, typeName kcptenancyv1alpha.WorkspaceTypeName, typePath string) error {
 	ws := &kcptenancyv1alpha.Workspace{}
 	ws.APIVersion = kcptenancyv1alpha.SchemeGroupVersion.String()
 	ws.Kind = "Workspace"
@@ -119,7 +119,7 @@ func applyWorkspace(ctx context.Context, k8sClient client.Client, name, path str
 	}
 	unstructuredObj := unstructured.Unstructured{Object: unstructuredWs}
 
-	err = k8sClient.Apply(ctx, client.ApplyConfigurationFromUnstructured(&unstructuredObj),
+	err = scopedKubeClient.Apply(ctx, client.ApplyConfigurationFromUnstructured(&unstructuredObj),
 		client.FieldOwner("platform-mesh-operator"), client.ForceOwnership)
 	if err != nil {
 		return gcerrors.Wrap(err, "failed to apply workspace %s", path)
@@ -145,14 +145,14 @@ func (r *WorkspaceSubroutine) Finalize(ctx context.Context, obj client.Object) (
 		return subroutines.OK(), gcerrors.Wrap(err, "failed to build kcp admin config")
 	}
 
-	k8sClient, err := r.kcpHelper.NewKcpClient(restCfg, parentPath)
+	kcpKubeClient, err := r.kcpHelper.NewKcpClient(restCfg, parentPath)
 	if err != nil {
 		return subroutines.OK(), gcerrors.Wrap(err, "failed to create kcp client for parent workspace %s", parentPath)
 	}
 
 	ws := &kcptenancyv1alpha.Workspace{}
 	ws.Name = workspaceName
-	if err = k8sClient.Delete(ctx, ws); err != nil && !kerrors.IsNotFound(err) {
+	if err = kcpKubeClient.Delete(ctx, ws); err != nil && !kerrors.IsNotFound(err) {
 		return subroutines.OK(), gcerrors.Wrap(err, "failed to delete workspace %s", wsPath)
 	}
 

@@ -87,7 +87,7 @@ func NewManagedProviderReconciler(mgr mcmanager.Manager, cfg *config.OperatorCon
 		subs = append(subs, pmsubs.NewWorkspaceSubroutine(localCl, kcpHelper, cfg, kcpUrl))
 	}
 	if cfg.Subroutines.ManagedProvider.ProviderResource.Enabled {
-		subs = append(subs, pmsubs.NewProviderResourceSubroutine(localCl))
+		subs = append(subs, pmsubs.NewProviderResourceSubroutine(localCl, kcpHelper, cfg, kcpUrl))
 	}
 	if cfg.Subroutines.ManagedProvider.WaitProvider.Enabled {
 		subs = append(subs, pmsubs.NewWaitProviderSubroutine(localCl))
