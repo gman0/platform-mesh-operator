@@ -62,21 +62,15 @@ func (r *ProviderResourceSubroutine) Process(ctx context.Context, obj client.Obj
 	inst := obj.(*providersv1alpha1.ManagedProvider)
 
 	wsPath := workspacePath(inst)
-	parentPath, workspaceName, err := splitPath(wsPath)
-	if err != nil {
-		return subroutines.OK(), err
-	}
-
-	log.Debug().Str("parentPath", parentPath).Str("workspaceName", workspaceName).Msg("Ensuring provider workspace")
 
 	restCfg, err := pmsubs.BuildKcpAdminConfig(r.client, &r.cfg.KCP, r.kcpUrl)
 	if err != nil {
 		return subroutines.OK(), gcerrors.Wrap(err, "failed to build kcp admin config")
 	}
 
-	scopedKubeClient, err := r.kcpHelper.NewKcpClient(restCfg, parentPath)
+	scopedKubeClient, err := r.kcpHelper.NewKcpClient(restCfg, wsPath)
 	if err != nil {
-		return subroutines.OK(), gcerrors.Wrap(err, "failed to create kcp client for parent workspace %s", parentPath)
+		return subroutines.OK(), gcerrors.Wrap(err, "failed to create kcp client for provider workspace %s", wsPath)
 	}
 
 	if err := applyProvider(ctx, scopedKubeClient, inst.Name, func(p *providersv1alpha1.Provider) {
@@ -118,19 +112,15 @@ func (r *ProviderResourceSubroutine) Finalize(ctx context.Context, obj client.Ob
 
 	log := logger.LoadLoggerFromContext(ctx).ChildLogger("subroutine", r.GetName())
 	wsPath := workspacePath(inst)
-	parentPath, _, err := splitPath(wsPath)
-	if err != nil {
-		return subroutines.OK(), err
-	}
 
 	restCfg, err := pmsubs.BuildKcpAdminConfig(r.client, &r.cfg.KCP, r.kcpUrl)
 	if err != nil {
 		return subroutines.OK(), gcerrors.Wrap(err, "failed to build kcp admin config")
 	}
 
-	scopedKubeClient, err := r.kcpHelper.NewKcpClient(restCfg, parentPath)
+	scopedKubeClient, err := r.kcpHelper.NewKcpClient(restCfg, wsPath)
 	if err != nil {
-		return subroutines.OK(), gcerrors.Wrap(err, "failed to create kcp client for parent workspace %s", parentPath)
+		return subroutines.OK(), gcerrors.Wrap(err, "failed to create kcp client for provider workspace %s", wsPath)
 	}
 
 	provider := &providersv1alpha1.Provider{}
