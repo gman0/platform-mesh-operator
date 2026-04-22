@@ -45,11 +45,11 @@ type ManagedProviderSubroutineConfig struct {
 }
 
 type ManagedProviderSubroutinesConfig struct {
-	Workspace       ManagedProviderSubroutineConfig
+	Workspace        ManagedProviderSubroutineConfig
 	ProviderResource ManagedProviderSubroutineConfig
-	WaitProvider    ManagedProviderSubroutineConfig
-	KubeconfigCopy  ManagedProviderSubroutineConfig
-	Deploy          ManagedProviderSubroutineConfig
+	WaitProvider     ManagedProviderSubroutineConfig
+	KubeconfigCopy   ManagedProviderSubroutineConfig
+	Deploy           ManagedProviderSubroutineConfig
 }
 
 type SubroutinesConfig struct {
@@ -141,4 +141,36 @@ func (c *OperatorConfig) AddFlags(fs *pflag.FlagSet) {
 	fs.BoolVar(&c.Subroutines.ManagedProvider.WaitProvider.Enabled, "subroutines-managed-provider-wait-enabled", c.Subroutines.ManagedProvider.WaitProvider.Enabled, "Enable ManagedProvider wait-provider subroutine")
 	fs.BoolVar(&c.Subroutines.ManagedProvider.KubeconfigCopy.Enabled, "subroutines-managed-provider-kubeconfig-enabled", c.Subroutines.ManagedProvider.KubeconfigCopy.Enabled, "Enable ManagedProvider kubeconfig-copy subroutine")
 	fs.BoolVar(&c.Subroutines.ManagedProvider.Deploy.Enabled, "subroutines-managed-provider-deploy-enabled", c.Subroutines.ManagedProvider.Deploy.Enabled, "Enable ManagedProvider deploy subroutine")
+}
+
+type ProvidersConfig struct {
+	ProvidersAPIExportEndpointSliceName      string
+	ProvidersAPIExportEndpointSliceWorkspace string
+	KCP                                      KCPConfig
+}
+
+func NewProvidersConfig() ProvidersConfig {
+	return ProvidersConfig{
+		KCP: KCPConfig{
+			Namespace:              "platform-mesh-system",
+			RootShardName:          "root",
+			FrontProxyName:         "frontproxy",
+			FrontProxyPort:         "6443",
+			ClusterAdminSecretName: "kcp-cluster-admin-client-cert",
+		},
+		ProvidersAPIExportEndpointSliceName:      "providers.platform-mesh.io",
+		ProvidersAPIExportEndpointSliceWorkspace: "root:platform-mesh-system",
+	}
+}
+
+func (c *ProvidersConfig) AddFlags(fs *pflag.FlagSet) {
+	fs.StringVar(&c.ProvidersAPIExportEndpointSliceName, "providers-apiexport-endpointslice-name", c.ProvidersAPIExportEndpointSliceName, "Set name of the Providers APIExport endpoint slice to use")
+	fs.StringVar(&c.ProvidersAPIExportEndpointSliceWorkspace, "providers-apiexport-endpointslice-workspace", c.ProvidersAPIExportEndpointSliceWorkspace, "Set workspace of the Providers APIExport endpoint slice to use")
+
+	fs.StringVar(&c.KCP.Url, "kcp-url", c.KCP.Url, "Set KCP URL")
+	fs.StringVar(&c.KCP.Namespace, "kcp-namespace", c.KCP.Namespace, "Set KCP namespace")
+	fs.StringVar(&c.KCP.RootShardName, "kcp-root-shard-name", c.KCP.RootShardName, "Set KCP root shard name")
+	fs.StringVar(&c.KCP.FrontProxyName, "kcp-front-proxy-name", c.KCP.FrontProxyName, "Set KCP front-proxy name")
+	fs.StringVar(&c.KCP.FrontProxyPort, "kcp-front-proxy-port", c.KCP.FrontProxyPort, "Set KCP front-proxy port")
+	fs.StringVar(&c.KCP.ClusterAdminSecretName, "kcp-cluster-admin-secret-name", c.KCP.ClusterAdminSecretName, "Set cluster-admin secret name")
 }

@@ -23,7 +23,6 @@ import (
 	pmconfig "github.com/platform-mesh/golang-commons/config"
 	"github.com/platform-mesh/golang-commons/controller/filter"
 	"github.com/platform-mesh/golang-commons/controller/lifecycle/ratelimiter"
-	"github.com/platform-mesh/subroutines"
 	"github.com/platform-mesh/subroutines/conditions"
 	"github.com/platform-mesh/subroutines/lifecycle"
 	"k8s.io/client-go/util/workqueue"
@@ -36,14 +35,13 @@ import (
 	mcreconcile "sigs.k8s.io/multicluster-runtime/pkg/reconcile"
 
 	providersv1alpha1 "github.com/platform-mesh/platform-mesh-operator/api/providers/v1alpha1"
-	"github.com/platform-mesh/platform-mesh-operator/internal/config"
-	pmsubroutines "github.com/platform-mesh/platform-mesh-operator/pkg/subroutines"
-	pmsubs "github.com/platform-mesh/platform-mesh-operator/pkg/subroutines/providers"
 )
 
 const ProviderControllerName = "ProviderReconciler"
 
-// ProviderReconciler reconciles a Provider object
+// ProviderReconciler reconciles Provider objects in kcp workspaces via the
+// providers.platform-mesh.io virtual workspace. For each Provider it creates
+// a ServiceAccount, RBAC, and a kubeconfig Secret inside the provider workspace.
 type ProviderReconciler struct {
 	lifecycle   *lifecycle.Lifecycle
 	rateLimiter workqueue.TypedRateLimiter[mcreconcile.Request]
@@ -53,20 +51,11 @@ type ProviderReconciler struct {
 // +kubebuilder:rbac:groups=providers.platform-mesh.io,resources=providers/status,verbs=get;update;patch
 // +kubebuilder:rbac:groups=providers.platform-mesh.io,resources=providers/finalizers,verbs=update
 
-// Reconcile is part of the main kubernetes reconciliation loop which aims to
-// move the current state of the cluster closer to the desired state.
-// TODO(user): Modify the Reconcile function to compare the state specified by
-// the Provider object against the actual cluster state, and then
-// perform operations to make the cluster state reflect the state specified by
-// the user.
-//
-// For more details, check Reconcile and its Result here:
-// - https://pkg.go.dev/sigs.k8s.io/controller-runtime@v0.23.3/pkg/reconcile
 func (r *ProviderReconciler) Reconcile(ctx context.Context, req mcreconcile.Request) (ctrl.Result, error) {
 	return r.lifecycle.Reconcile(ctx, req)
 }
 
-// SetupWithManager sets up the controller with the Manager.
+// SetupWithManager sets up the Provider controller with the Manager.
 func (r *ProviderReconciler) SetupWithManager(mgr mcmanager.Manager, cfg *pmconfig.CommonServiceConfig,
 	eventPredicates ...predicate.Predicate) error {
 	opts := controller.TypedOptions[mcreconcile.Request]{
@@ -75,39 +64,14 @@ func (r *ProviderReconciler) SetupWithManager(mgr mcmanager.Manager, cfg *pmconf
 	}
 	predicates := append([]predicate.Predicate{filter.DebugResourcesBehaviourPredicate(cfg.DebugLabelValue)}, eventPredicates...)
 	return mcbuilder.ControllerManagedBy(mgr).
-		Named(ManagedProviderControllerName).
-		For(&providersv1alpha1.ManagedProvider{}).
+		Named(ProviderControllerName).
+		For(&providersv1alpha1.Provider{}).
 		WithOptions(opts).
 		WithEventFilter(predicate.And(predicates...)).
 		Complete(r)
 }
 
-func NewProviderReconciler(mgr mcmanager.Manager, cfg *config.OperatorConfig, commonCfg *pmconfig.CommonServiceConfig) (*ProviderReconciler, error) {
-	kcpUrl := fmt.Sprintf("https://%s-front-proxy.%s:%s", cfg.KCP.FrontProxyName, cfg.KCP.Namespace, cfg.KCP.FrontProxyPort)
-	if cfg.KCP.Url != "" {
-		kcpUrl = cfg.KCP.Url
-	}
-
-	localCl := mgr.GetLocalManager().GetClient()
-	kcpHelper := &pmsubroutines.Helper{}
-
-	var subs []subroutines.Subroutine
-	if cfg.Subroutines.ManagedProvider.Workspace.Enabled {
-		subs = append(subs, pmsubs.NewWorkspaceSubroutine(localCl, kcpHelper, cfg, kcpUrl))
-	}
-	if cfg.Subroutines.ManagedProvider.ProviderResource.Enabled {
-		subs = append(subs, pmsubs.NewProviderResourceSubroutine(localCl))
-	}
-	if cfg.Subroutines.ManagedProvider.WaitProvider.Enabled {
-		subs = append(subs, pmsubs.NewWaitProviderSubroutine(localCl))
-	}
-	if cfg.Subroutines.ManagedProvider.KubeconfigCopy.Enabled {
-		subs = append(subs, pmsubs.NewKubeconfigCopySubroutine(localCl))
-	}
-	if cfg.Subroutines.ManagedProvider.Deploy.Enabled {
-		subs = append(subs, pmsubs.NewDeploySubroutine(localCl))
-	}
-
+func NewProviderReconciler(mgr mcmanager.Manager, commonCfg *pmconfig.CommonServiceConfig) (*ProviderReconciler, error) {
 	rl, err := ratelimiter.NewStaticThenExponentialRateLimiter[mcreconcile.Request](ratelimiter.NewConfig())
 	if err != nil {
 		return nil, fmt.Errorf("creating rate limiter: %w", err)
@@ -115,7 +79,7 @@ func NewProviderReconciler(mgr mcmanager.Manager, cfg *config.OperatorConfig, co
 
 	lc := lifecycle.New(mgr, ProviderControllerName, func() client.Object {
 		return &providersv1alpha1.Provider{}
-	}, subs...).WithConditions(conditions.NewManager())
+	}).WithConditions(conditions.NewManager())
 
 	return &ProviderReconciler{
 		lifecycle:   lc,
