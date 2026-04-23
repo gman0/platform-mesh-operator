@@ -73,29 +73,29 @@ func (r *ManagedProviderReconciler) SetupWithManager(mgr mcmanager.Manager, cfg 
 		Complete(r)
 }
 
-func NewManagedProviderReconciler(mgr mcmanager.Manager, cfg *config.OperatorConfig, commonCfg *pmconfig.CommonServiceConfig) (*ManagedProviderReconciler, error) {
-	kcpUrl := fmt.Sprintf("https://%s-front-proxy.%s:%s", cfg.KCP.FrontProxyName, cfg.KCP.Namespace, cfg.KCP.FrontProxyPort)
-	if cfg.KCP.Url != "" {
-		kcpUrl = cfg.KCP.Url
+func NewManagedProviderReconciler(mgr mcmanager.Manager, operatorCfg *config.OperatorConfig, commonCfg *pmconfig.CommonServiceConfig) (*ManagedProviderReconciler, error) {
+	kcpUrl := operatorCfg.KCP.Url
+	if operatorCfg.KCP.Url != "" {
+		kcpUrl = fmt.Sprintf("https://%s-front-proxy.%s:%s", operatorCfg.KCP.FrontProxyName, operatorCfg.KCP.Namespace, operatorCfg.KCP.FrontProxyPort)
 	}
 
 	localCl := mgr.GetLocalManager().GetClient()
 	kcpHelper := &pmsubroutines.Helper{}
 
 	var subs []subroutines.Subroutine
-	if cfg.Subroutines.ManagedProvider.Workspace.Enabled {
-		subs = append(subs, pmsubs.NewWorkspaceSubroutine(localCl, kcpHelper, cfg, kcpUrl))
+	if operatorCfg.Subroutines.ManagedProvider.Workspace.Enabled {
+		subs = append(subs, pmsubs.NewWorkspaceSubroutine(localCl, kcpHelper, operatorCfg, kcpUrl))
 	}
-	if cfg.Subroutines.ManagedProvider.ProviderResource.Enabled {
-		subs = append(subs, pmsubs.NewProviderResourceSubroutine(localCl, kcpHelper, cfg, kcpUrl))
+	if operatorCfg.Subroutines.ManagedProvider.ProviderResource.Enabled {
+		subs = append(subs, pmsubs.NewProviderResourceSubroutine(localCl, kcpHelper, operatorCfg, kcpUrl))
 	}
-	if cfg.Subroutines.ManagedProvider.WaitProvider.Enabled {
-		subs = append(subs, pmsubs.NewWaitProviderSubroutine(localCl, kcpHelper, cfg, kcpUrl))
+	if operatorCfg.Subroutines.ManagedProvider.WaitProvider.Enabled {
+		subs = append(subs, pmsubs.NewWaitProviderSubroutine(localCl, kcpHelper, operatorCfg, kcpUrl))
 	}
-	if cfg.Subroutines.ManagedProvider.KubeconfigCopy.Enabled {
-		subs = append(subs, pmsubs.NewKubeconfigCopySubroutine(localCl, kcpHelper, cfg, kcpUrl))
+	if operatorCfg.Subroutines.ManagedProvider.KubeconfigCopy.Enabled {
+		subs = append(subs, pmsubs.NewKubeconfigCopySubroutine(localCl, kcpHelper, operatorCfg, kcpUrl))
 	}
-	if cfg.Subroutines.ManagedProvider.Deploy.Enabled {
+	if operatorCfg.Subroutines.ManagedProvider.Deploy.Enabled {
 		subs = append(subs, pmsubs.NewDeploySubroutine(localCl))
 	}
 

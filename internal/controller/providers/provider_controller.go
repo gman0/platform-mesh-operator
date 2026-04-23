@@ -23,6 +23,7 @@ import (
 	pmconfig "github.com/platform-mesh/golang-commons/config"
 	"github.com/platform-mesh/golang-commons/controller/filter"
 	"github.com/platform-mesh/golang-commons/controller/lifecycle/ratelimiter"
+	"github.com/platform-mesh/platform-mesh-operator/internal/config"
 	"github.com/platform-mesh/subroutines"
 	"github.com/platform-mesh/subroutines/conditions"
 	"github.com/platform-mesh/subroutines/lifecycle"
@@ -73,7 +74,12 @@ func (r *ProviderReconciler) SetupWithManager(mgr mcmanager.Manager, cfg *pmconf
 		Complete(r)
 }
 
-func NewProviderReconciler(mgr mcmanager.Manager, commonCfg *pmconfig.CommonServiceConfig) (*ProviderReconciler, error) {
+func NewProviderReconciler(mgr mcmanager.Manager, providersCfg *config.ProvidersConfig, commonCfg *pmconfig.CommonServiceConfig) (*ProviderReconciler, error) {
+	kcpUrl := providersCfg.KCP.Url
+	if providersCfg.KCP.Url != "" {
+		kcpUrl = fmt.Sprintf("https://%s-front-proxy.%s:%s", providersCfg.KCP.FrontProxyName, providersCfg.KCP.Namespace, providersCfg.KCP.FrontProxyPort)
+	}
+
 	rl, err := ratelimiter.NewStaticThenExponentialRateLimiter[mcreconcile.Request](ratelimiter.NewConfig())
 	if err != nil {
 		return nil, fmt.Errorf("creating rate limiter: %w", err)
@@ -82,10 +88,7 @@ func NewProviderReconciler(mgr mcmanager.Manager, commonCfg *pmconfig.CommonServ
 	cl := mgr.GetLocalManager().GetClient()
 
 	subs := []subroutines.Subroutine{
-		pmsubs.NewServiceAccountSubroutine(cl),
-		pmsubs.NewServiceAccountTokenSubroutine(cl),
-		pmsubs.NewRBACSubroutine(cl),
-		pmsubs.NewKubeconfigSecretSubroutine(cl),
+		pmsubs.NewScopedKubeconfigSubroutine(cl),
 	}
 
 	lc := lifecycle.New(mgr, ProviderControllerName, func() client.Object {
