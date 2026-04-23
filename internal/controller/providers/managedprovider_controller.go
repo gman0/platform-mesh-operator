@@ -90,10 +90,10 @@ func NewManagedProviderReconciler(mgr mcmanager.Manager, cfg *config.OperatorCon
 		subs = append(subs, pmsubs.NewProviderResourceSubroutine(localCl, kcpHelper, cfg, kcpUrl))
 	}
 	if cfg.Subroutines.ManagedProvider.WaitProvider.Enabled {
-		subs = append(subs, pmsubs.NewWaitProviderSubroutine(localCl))
+		subs = append(subs, pmsubs.NewWaitProviderSubroutine(localCl, kcpHelper, cfg, kcpUrl))
 	}
 	if cfg.Subroutines.ManagedProvider.KubeconfigCopy.Enabled {
-		subs = append(subs, pmsubs.NewKubeconfigCopySubroutine(localCl))
+		subs = append(subs, pmsubs.NewKubeconfigCopySubroutine(localCl, kcpHelper, cfg, kcpUrl))
 	}
 	if cfg.Subroutines.ManagedProvider.Deploy.Enabled {
 		subs = append(subs, pmsubs.NewDeploySubroutine(localCl))

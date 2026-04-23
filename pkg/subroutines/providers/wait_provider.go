@@ -18,30 +18,79 @@ package providers
 
 import (
 	"context"
+	"time"
 
+	gcerrors "github.com/platform-mesh/golang-commons/errors"
+	"github.com/platform-mesh/golang-commons/logger"
 	"github.com/platform-mesh/subroutines"
+	kerrors "k8s.io/apimachinery/pkg/api/errors"
+	"k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+
+	providersv1alpha1 "github.com/platform-mesh/platform-mesh-operator/api/providers/v1alpha1"
+	"github.com/platform-mesh/platform-mesh-operator/internal/config"
+	pmsubs "github.com/platform-mesh/platform-mesh-operator/pkg/subroutines"
 )
 
-const WaitProviderSubroutineName = "WaitProviderSubroutine"
+const (
+	WaitProviderSubroutineName  = "WaitProviderSubroutine"
+	waitProviderRequeueDuration = 10 * time.Second
+)
 
 // WaitProviderSubroutine polls the Provider resource in the kcp workspace
 // until status.phase == "Ready", indicating that SA, RBAC, and the kubeconfig
 // Secret have been created by the Provider controller.
 type WaitProviderSubroutine struct {
-	client client.Client
+	client    client.Client
+	kcpHelper pmsubs.KcpHelper
+	cfg       *config.OperatorConfig
+	kcpUrl    string
 }
 
-func NewWaitProviderSubroutine(client client.Client) *WaitProviderSubroutine {
-	return &WaitProviderSubroutine{client: client}
+func NewWaitProviderSubroutine(cl client.Client, kcpHelper pmsubs.KcpHelper, cfg *config.OperatorConfig, kcpUrl string) *WaitProviderSubroutine {
+	return &WaitProviderSubroutine{
+		client:    cl,
+		kcpHelper: kcpHelper,
+		cfg:       cfg,
+		kcpUrl:    kcpUrl,
+	}
 }
 
 func (r *WaitProviderSubroutine) GetName() string {
 	return WaitProviderSubroutineName
 }
 
-func (r *WaitProviderSubroutine) Process(_ context.Context, _ client.Object) (subroutines.Result, error) {
-	// TODO: fetch Provider from kcp workspace and requeue until phase == "Ready"
+func (r *WaitProviderSubroutine) Process(ctx context.Context, obj client.Object) (subroutines.Result, error) {
+	log := logger.LoadLoggerFromContext(ctx).ChildLogger("subroutine", r.GetName())
+	inst := obj.(*providersv1alpha1.ManagedProvider)
+
+	wsPath := workspacePath(inst)
+
+	restCfg, err := pmsubs.BuildKcpAdminConfig(r.client, &r.cfg.KCP, r.kcpUrl)
+	if err != nil {
+		return subroutines.OK(), gcerrors.Wrap(err, "failed to build kcp admin config")
+	}
+
+	scopedKubeClient, err := r.kcpHelper.NewKcpClient(restCfg, wsPath)
+	if err != nil {
+		return subroutines.OK(), gcerrors.Wrap(err, "failed to create kcp client for provider workspace %s", wsPath)
+	}
+
+	provider := &providersv1alpha1.Provider{}
+	if err := scopedKubeClient.Get(ctx, types.NamespacedName{Name: inst.Name}, provider); err != nil {
+		if kerrors.IsNotFound(err) {
+			log.Info().Str("workspace", wsPath).Msg("Provider not found yet, requeuing")
+			return subroutines.StopWithRequeue(waitProviderRequeueDuration, "Provider not found yet"), nil
+		}
+		return subroutines.OK(), gcerrors.Wrap(err, "failed to get Provider %s from workspace %s", inst.Name, wsPath)
+	}
+
+	if provider.Status.Phase != "Ready" {
+		log.Info().Str("workspace", wsPath).Str("phase", provider.Status.Phase).Msg("Provider not Ready yet, requeuing")
+		return subroutines.StopWithRequeue(waitProviderRequeueDuration, "waiting for Provider to become Ready"), nil
+	}
+
+	log.Info().Str("workspace", wsPath).Msg("Provider is Ready")
 	return subroutines.OK(), nil
 }
 

@@ -18,36 +18,95 @@ package providers
 
 import (
 	"context"
+	"time"
 
+	gcerrors "github.com/platform-mesh/golang-commons/errors"
+	"github.com/platform-mesh/golang-commons/logger"
 	"github.com/platform-mesh/subroutines"
+	corev1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+
+	providersv1alpha1 "github.com/platform-mesh/platform-mesh-operator/api/providers/v1alpha1"
+	"github.com/platform-mesh/platform-mesh-operator/internal/config"
+	pmsubs "github.com/platform-mesh/platform-mesh-operator/pkg/subroutines"
 )
 
-const KubeconfigCopySubroutineName = "KubeconfigCopySubroutine"
+const (
+	KubeconfigCopySubroutineName  = "KubeconfigCopySubroutine"
+	kubeconfigCopyRequeueDuration = 10 * time.Second
+)
 
 // KubeconfigCopySubroutine copies the kubeconfig Secret produced by the
 // Provider controller from the kcp provider workspace into the runtime
 // namespace, and records its name in status.kubeconfigSecretRef.
 type KubeconfigCopySubroutine struct {
-	client client.Client
+	client    client.Client
+	kcpHelper pmsubs.KcpHelper
+	cfg       *config.OperatorConfig
+	kcpUrl    string
 }
 
-func NewKubeconfigCopySubroutine(client client.Client) *KubeconfigCopySubroutine {
-	return &KubeconfigCopySubroutine{client: client}
+func NewKubeconfigCopySubroutine(cl client.Client, kcpHelper pmsubs.KcpHelper, cfg *config.OperatorConfig, kcpUrl string) *KubeconfigCopySubroutine {
+	return &KubeconfigCopySubroutine{
+		client:    cl,
+		kcpHelper: kcpHelper,
+		cfg:       cfg,
+		kcpUrl:    kcpUrl,
+	}
 }
 
 func (r *KubeconfigCopySubroutine) GetName() string {
 	return KubeconfigCopySubroutineName
 }
 
-func (r *KubeconfigCopySubroutine) Process(_ context.Context, _ client.Object) (subroutines.Result, error) {
-	// TODO: read kubeconfig Secret from kcp workspace and write it to the
-	// runtime namespace; update status.kubeconfigSecretRef
+func (r *KubeconfigCopySubroutine) Process(ctx context.Context, obj client.Object) (subroutines.Result, error) {
+	log := logger.LoadLoggerFromContext(ctx).ChildLogger("subroutine", r.GetName())
+	inst := obj.(*providersv1alpha1.ManagedProvider)
+
+	wsPath := workspacePath(inst)
+
+	restCfg, err := pmsubs.BuildKcpAdminConfig(r.client, &r.cfg.KCP, r.kcpUrl)
+	if err != nil {
+		return subroutines.OK(), gcerrors.Wrap(err, "failed to build kcp admin config")
+	}
+
+	scopedKubeClient, err := r.kcpHelper.NewKcpClient(restCfg, wsPath)
+	if err != nil {
+		return subroutines.OK(), gcerrors.Wrap(err, "failed to create kcp client for provider workspace %s", wsPath)
+	}
+
+	// Fetch the Provider to find the kubeconfig Secret name set by the Provider controller.
+	provider := &providersv1alpha1.Provider{}
+	if err := scopedKubeClient.Get(ctx, types.NamespacedName{Name: inst.Name}, provider); err != nil {
+		return subroutines.OK(), gcerrors.Wrap(err, "failed to get Provider %s from workspace %s", inst.Name, wsPath)
+	}
+	if provider.Status.KubeconfigSecretRef == nil {
+		log.Info().Str("workspace", wsPath).Msg("Provider kubeconfigSecretRef not set yet, requeuing")
+		return subroutines.StopWithRequeue(kubeconfigCopyRequeueDuration, "waiting for Provider to set kubeconfigSecretRef"), nil
+	}
+
+	// Fetch the kubeconfig Secret from the provider workspace.
+	kcpSecret := &corev1.Secret{}
+	if err := scopedKubeClient.Get(ctx, types.NamespacedName{Name: provider.Status.KubeconfigSecretRef.Name}, kcpSecret); err != nil {
+		return subroutines.OK(), gcerrors.Wrap(err, "failed to get kubeconfig Secret %s from workspace %s", provider.Status.KubeconfigSecretRef.Name, wsPath)
+	}
+
+	// TODO: write or patch kcpSecret into the runtime namespace via r.client.
+	// TODO: update inst.Status.KubeconfigSecretRef with the runtime-side Secret name.
+
+	log.Info().Str("workspace", wsPath).Str("secret", provider.Status.KubeconfigSecretRef.Name).Msg("Copied kubeconfig Secret to runtime namespace")
 	return subroutines.OK(), nil
 }
 
-func (r *KubeconfigCopySubroutine) Finalize(_ context.Context, _ client.Object) (subroutines.Result, error) {
-	// TODO: delete the runtime kubeconfig Secret on teardown
+func (r *KubeconfigCopySubroutine) Finalize(ctx context.Context, obj client.Object) (subroutines.Result, error) {
+	inst := obj.(*providersv1alpha1.ManagedProvider)
+	if !inst.Spec.CleanupOnDelete {
+		return subroutines.OK(), nil
+	}
+
+	// TODO: delete the runtime kubeconfig Secret via r.client.
+
 	return subroutines.OK(), nil
 }
 

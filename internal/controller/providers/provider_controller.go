@@ -23,6 +23,7 @@ import (
 	pmconfig "github.com/platform-mesh/golang-commons/config"
 	"github.com/platform-mesh/golang-commons/controller/filter"
 	"github.com/platform-mesh/golang-commons/controller/lifecycle/ratelimiter"
+	"github.com/platform-mesh/subroutines"
 	"github.com/platform-mesh/subroutines/conditions"
 	"github.com/platform-mesh/subroutines/lifecycle"
 	"k8s.io/client-go/util/workqueue"
@@ -35,6 +36,7 @@ import (
 	mcreconcile "sigs.k8s.io/multicluster-runtime/pkg/reconcile"
 
 	providersv1alpha1 "github.com/platform-mesh/platform-mesh-operator/api/providers/v1alpha1"
+	pmsubs "github.com/platform-mesh/platform-mesh-operator/pkg/subroutines/providers"
 )
 
 const ProviderControllerName = "ProviderReconciler"
@@ -77,9 +79,18 @@ func NewProviderReconciler(mgr mcmanager.Manager, commonCfg *pmconfig.CommonServ
 		return nil, fmt.Errorf("creating rate limiter: %w", err)
 	}
 
+	cl := mgr.GetLocalManager().GetClient()
+
+	subs := []subroutines.Subroutine{
+		pmsubs.NewServiceAccountSubroutine(cl),
+		pmsubs.NewServiceAccountTokenSubroutine(cl),
+		pmsubs.NewRBACSubroutine(cl),
+		pmsubs.NewKubeconfigSecretSubroutine(cl),
+	}
+
 	lc := lifecycle.New(mgr, ProviderControllerName, func() client.Object {
 		return &providersv1alpha1.Provider{}
-	}).WithConditions(conditions.NewManager())
+	}, subs...).WithConditions(conditions.NewManager())
 
 	return &ProviderReconciler{
 		lifecycle:   lc,
