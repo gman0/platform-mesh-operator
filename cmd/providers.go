@@ -151,7 +151,7 @@ func RunProviders(_ *cobra.Command, _ []string) { // coverage-ignore
 
 	log.Info().Msg("Manager successfully started")
 
-	rec, err := providers.NewProviderReconciler(mgr, defaultCfg)
+	rec, err := providers.NewProviderReconciler(mgr, &providersCfg, defaultCfg)
 	if err != nil {
 		log.Fatal().Err(err).Msg("unable to create ProviderReconciler")
 	}

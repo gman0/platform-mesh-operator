@@ -75,7 +75,7 @@ func (r *ManagedProviderReconciler) SetupWithManager(mgr mcmanager.Manager, cfg 
 
 func NewManagedProviderReconciler(mgr mcmanager.Manager, operatorCfg *config.OperatorConfig, commonCfg *pmconfig.CommonServiceConfig) (*ManagedProviderReconciler, error) {
 	kcpUrl := operatorCfg.KCP.Url
-	if operatorCfg.KCP.Url != "" {
+	if kcpUrl == "" {
 		kcpUrl = fmt.Sprintf("https://%s-front-proxy.%s:%s", operatorCfg.KCP.FrontProxyName, operatorCfg.KCP.Namespace, operatorCfg.KCP.FrontProxyPort)
 	}
 
