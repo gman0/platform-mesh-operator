@@ -130,7 +130,7 @@ func RunProviders(_ *cobra.Command, _ []string) { // coverage-ignore
 		log.Fatal().Err(err).Msg("unable to create apiexport provider")
 	}
 
-	mgr, err := mcmanager.New(restCfg, providersVW, mcmanager.Options{
+	mgr, err := mcmanager.New(providersEndpointSliceCfg, providersVW, mcmanager.Options{
 		Scheme: scheme,
 		Metrics: metricsserver.Options{
 			BindAddress:   defaultCfg.Metrics.BindAddress,

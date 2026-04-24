@@ -7,6 +7,16 @@ spec:
   # for each claim once the permission-claim design is settled.
   permissionClaims:
   - group: ""
+    resource: namespaces
+    verbs:
+      - get
+      - list
+      - watch
+      - create
+      - update
+      - patch
+      - delete
+  - group: ""
     resource: serviceaccounts
     verbs:
     - get

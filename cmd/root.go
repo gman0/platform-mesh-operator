@@ -5,6 +5,8 @@ import (
 	pmconfig "github.com/platform-mesh/golang-commons/config"
 	"github.com/platform-mesh/golang-commons/logger"
 	"github.com/spf13/cobra"
+	corev1 "k8s.io/api/core/v1"
+	rbacv1 "k8s.io/api/rbac/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
 	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
@@ -36,6 +38,8 @@ func init() {
 	utilruntime.Must(corev1alpha1.AddToScheme(scheme))
 	// +kubebuilder:scaffold:scheme
 
+	utilruntime.Must(corev1.AddToScheme(scheme))
+	utilruntime.Must(rbacv1.AddToScheme(scheme))
 	utilruntime.Must(providers1alpha1.AddToScheme(scheme))
 	utilruntime.Must(kcpapisv1alpha1.AddToScheme(scheme))
 

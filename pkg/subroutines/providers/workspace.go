@@ -38,10 +38,8 @@ import (
 const (
 	WorkspaceSubroutineName      = "WorkspaceSubroutine"
 	WorkspaceSubroutineFinalizer = "providers.platform-mesh.io/workspace-finalizer"
-	defaultWorkspaceParent       = "root:providers"
-	// providerWorkspaceTypeName and providerWorkspaceTypePath identify the
-	// "providers" WorkspaceType defined in manifests/kcp/workspace-type-providers.yaml,
-	// which is applied at root.
+
+	defaultWorkspaceParent         = "root:providers"
 	providerWorkspaceTypeName      = "provider"
 	providerWorkspaceTypePath      = "root"
 	providersRootWorkspaceTypeName = "providers"

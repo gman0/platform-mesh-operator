@@ -76,7 +76,7 @@ func (r *ProviderReconciler) SetupWithManager(mgr mcmanager.Manager, cfg *pmconf
 
 func NewProviderReconciler(mgr mcmanager.Manager, providersCfg *config.ProvidersConfig, commonCfg *pmconfig.CommonServiceConfig) (*ProviderReconciler, error) {
 	kcpUrl := providersCfg.KCP.Url
-	if providersCfg.KCP.Url != "" {
+	if kcpUrl == "" {
 		kcpUrl = fmt.Sprintf("https://%s-front-proxy.%s:%s", providersCfg.KCP.FrontProxyName, providersCfg.KCP.Namespace, providersCfg.KCP.FrontProxyPort)
 	}
 
@@ -85,10 +85,8 @@ func NewProviderReconciler(mgr mcmanager.Manager, providersCfg *config.Providers
 		return nil, fmt.Errorf("creating rate limiter: %w", err)
 	}
 
-	cl := mgr.GetLocalManager().GetClient()
-
 	subs := []subroutines.Subroutine{
-		pmsubs.NewScopedKubeconfigSubroutine(cl, kcpUrl),
+		pmsubs.NewScopedKubeconfigSubroutine(mgr, kcpUrl),
 	}
 
 	lc := lifecycle.New(mgr, ProviderControllerName, func() client.Object {
