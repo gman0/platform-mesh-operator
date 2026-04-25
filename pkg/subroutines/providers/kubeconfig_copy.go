@@ -24,7 +24,9 @@ import (
 	"github.com/platform-mesh/golang-commons/logger"
 	"github.com/platform-mesh/subroutines"
 	corev1 "k8s.io/api/core/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
+	controllerruntime "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	providersv1alpha1 "github.com/platform-mesh/platform-mesh-operator/api/providers/v1alpha1"
@@ -87,13 +89,42 @@ func (r *KubeconfigCopySubroutine) Process(ctx context.Context, obj client.Objec
 	}
 
 	// Fetch the kubeconfig Secret from the provider workspace.
-	kcpSecret := &corev1.Secret{}
-	if err := scopedClient.Get(ctx, types.NamespacedName{Name: provider.Status.KubeconfigSecretRef.Name}, kcpSecret); err != nil {
+	origSecret := &corev1.Secret{}
+	if err := scopedClient.Get(ctx, types.NamespacedName{Name: provider.Status.KubeconfigSecretRef.Name, Namespace: provider.Status.KubeconfigSecretRef.Namespace}, origSecret); err != nil {
 		return subroutines.OK(), gcerrors.Wrap(err, "failed to get kubeconfig Secret %s from workspace %s", provider.Status.KubeconfigSecretRef.Name, wsPath)
 	}
 
-	// TODO: write or patch kcpSecret into the runtime namespace via r.client.
-	// TODO: update inst.Status.KubeconfigSecretRef with the runtime-side Secret name.
+	var kcpKubeconfig []byte
+	if origSecret.Data != nil {
+		kcpKubeconfig = origSecret.Data["kubeconfig"]
+	}
+
+	if len(kcpKubeconfig) == 0 {
+		return subroutines.StopWithRequeue(kubeconfigCopyRequeueDuration, "waiting for Provider to set kubeconfig in secret"), nil
+	}
+
+	copySecret := corev1.Secret{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      origSecret.Name,
+			Namespace: inst.Namespace,
+		},
+		Data: map[string][]byte{
+			"kubeconfig": kcpKubeconfig,
+		},
+	}
+	if _, err = controllerruntime.CreateOrUpdate(ctx, r.client, &copySecret, func() error {
+		copySecret.Data = map[string][]byte{
+			"kubeconfig": kcpKubeconfig,
+		}
+		return nil
+	}); err != nil {
+		return subroutines.OK(), gcerrors.Wrap(err, "failed to copy kubeconfig Secret %s from workspace %s into namespace %s", provider.Status.KubeconfigSecretRef.Name, wsPath, inst.Namespace)
+	}
+
+	inst.Status.KubeconfigSecretRef = &providersv1alpha1.SecretReference{
+		Name:      copySecret.Name,
+		Namespace: copySecret.Namespace,
+	}
 
 	log.Info().Str("workspace", wsPath).Str("secret", provider.Status.KubeconfigSecretRef.Name).Msg("Copied kubeconfig Secret to runtime namespace")
 	return subroutines.OK(), nil

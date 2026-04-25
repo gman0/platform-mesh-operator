@@ -40,7 +40,7 @@ type ProviderStatus struct {
 	// kubeconfigSecretRef points to the Secret created in the provider workspace
 	// that contains the scoped kubeconfig.
 	// +optional
-	KubeconfigSecretRef *LocalSecretReference `json:"kubeconfigSecretRef,omitempty"`
+	KubeconfigSecretRef *SecretReference `json:"kubeconfigSecretRef,omitempty"`
 
 	// conditions represent the current state of the Provider resource.
 	// +listType=map

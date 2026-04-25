@@ -192,6 +192,11 @@ spec:
                   name:
                     description: name is the Secret name.
                     type: string
+                  namespace:
+                    description: |-
+                      namespace is the Secret namespace. If left empty, it is assumed the namespace
+                      of the referencing object is used.
+                    type: string
                 required:
                 - name
                 type: object

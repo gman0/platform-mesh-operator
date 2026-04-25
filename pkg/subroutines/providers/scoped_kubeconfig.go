@@ -174,9 +174,9 @@ func (r *ScopedKubeconfigSubroutine) Process(ctx context.Context, obj client.Obj
 		return subroutines.OK(), gcerrors.Wrap(err, "write kubeconfig Secret %s", kubeconfigSecretName)
 	}
 
-	inst.Status.KubeconfigSecretRef = &providersv1alpha1.LocalSecretReference{
-		Name: kubeconfigSecretName,
-		// TODO: add namespace
+	inst.Status.KubeconfigSecretRef = &providersv1alpha1.SecretReference{
+		Name:      kubeconfigSecretName,
+		Namespace: providerSANamespace,
 	}
 
 	// TODO: move out if we have more subroutines.

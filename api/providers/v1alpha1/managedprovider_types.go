@@ -79,7 +79,7 @@ type ManagedProviderStatus struct {
 	// kubeconfigSecretRef points to the Secret in the runtime namespace that
 	// contains the scoped kubeconfig copied from the provider kcp workspace.
 	// +optional
-	KubeconfigSecretRef *LocalSecretReference `json:"kubeconfigSecretRef,omitempty"`
+	KubeconfigSecretRef *SecretReference `json:"kubeconfigSecretRef,omitempty"`
 
 	// conditions represent the current state of the ManagedProvider resource.
 	// +listType=map
@@ -92,11 +92,14 @@ type ManagedProviderStatus struct {
 	ObservedGeneration int64 `json:"observedGeneration,omitempty"`
 }
 
-// LocalSecretReference is a reference to a Secret in the same namespace.
-type LocalSecretReference struct {
+// SecretReference is a reference to a Secret in the same namespace.
+type SecretReference struct {
 	// name is the Secret name.
 	// +required
 	Name string `json:"name"`
+	// namespace is the Secret namespace. If left empty, it is assumed the namespace
+	// of the referencing object is used.
+	Namespace string `json:"namespace,omitempty"`
 }
 
 // +kubebuilder:object:root=true

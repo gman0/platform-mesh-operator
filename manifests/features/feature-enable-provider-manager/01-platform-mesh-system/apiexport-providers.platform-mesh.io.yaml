@@ -7,7 +7,7 @@ spec:
   resources:
     - group: providers.platform-mesh.io
       name: providers
-      schema: v260420-d674790.providers.providers.platform-mesh.io
+      schema: v260425-dff52c1.providers.providers.platform-mesh.io
       storage:
         crd: {}
   # TODO(RFC-006 open question #4): finalise constraints (e.g. namespace selectors)
