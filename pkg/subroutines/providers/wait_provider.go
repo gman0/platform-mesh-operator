@@ -71,13 +71,13 @@ func (r *WaitProviderSubroutine) Process(ctx context.Context, obj client.Object)
 		return subroutines.OK(), gcerrors.Wrap(err, "failed to build kcp admin config")
 	}
 
-	scopedKubeClient, err := r.kcpHelper.NewKcpClient(restCfg, wsPath)
+	scopedClient, err := r.kcpHelper.NewKcpClient(restCfg, wsPath)
 	if err != nil {
 		return subroutines.OK(), gcerrors.Wrap(err, "failed to create kcp client for provider workspace %s", wsPath)
 	}
 
 	provider := &providersv1alpha1.Provider{}
-	if err := scopedKubeClient.Get(ctx, types.NamespacedName{Name: inst.Name}, provider); err != nil {
+	if err := scopedClient.Get(ctx, types.NamespacedName{Name: inst.Name}, provider); err != nil {
 		if kerrors.IsNotFound(err) {
 			log.Info().Str("workspace", wsPath).Msg("Provider not found yet, requeuing")
 			return subroutines.StopWithRequeue(waitProviderRequeueDuration, "Provider not found yet"), nil

@@ -68,12 +68,12 @@ func (r *ProviderResourceSubroutine) Process(ctx context.Context, obj client.Obj
 		return subroutines.OK(), gcerrors.Wrap(err, "failed to build kcp admin config")
 	}
 
-	scopedKubeClient, err := r.kcpHelper.NewKcpClient(restCfg, wsPath)
+	scopedClient, err := r.kcpHelper.NewKcpClient(restCfg, wsPath)
 	if err != nil {
 		return subroutines.OK(), gcerrors.Wrap(err, "failed to create kcp client for provider workspace %s", wsPath)
 	}
 
-	if err := applyProvider(ctx, scopedKubeClient, inst.Name, func(p *providersv1alpha1.Provider) {
+	if err := applyProvider(ctx, scopedClient, inst.Name, func(p *providersv1alpha1.Provider) {
 		p.Spec.HostOverride = "" // TODO
 	}); err != nil {
 		return subroutines.Result{}, err

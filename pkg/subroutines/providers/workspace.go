@@ -85,12 +85,12 @@ func (r *WorkspaceSubroutine) Process(ctx context.Context, obj client.Object) (s
 		return subroutines.OK(), gcerrors.Wrap(err, "failed to build kcp admin config")
 	}
 
-	scopedKubeClient, err := r.kcpHelper.NewKcpClient(restCfg, parentPath)
+	scopedClient, err := r.kcpHelper.NewKcpClient(restCfg, parentPath)
 	if err != nil {
 		return subroutines.OK(), gcerrors.Wrap(err, "failed to create kcp client for parent workspace %s", parentPath)
 	}
 
-	if err := applyWorkspace(ctx, scopedKubeClient,
+	if err := applyWorkspace(ctx, scopedClient,
 		workspaceName, wsPath,
 		providerWorkspaceTypeName, providerWorkspaceTypePath,
 	); err != nil {

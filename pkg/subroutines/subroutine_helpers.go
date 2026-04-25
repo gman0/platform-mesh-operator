@@ -23,6 +23,7 @@ import (
 	pmconfig "github.com/platform-mesh/golang-commons/config"
 	"github.com/platform-mesh/golang-commons/errors"
 	"github.com/platform-mesh/golang-commons/logger"
+	providers1alpha1 "github.com/platform-mesh/platform-mesh-operator/api/providers/v1alpha1"
 	v1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	rbacv1 "k8s.io/api/rbac/v1"
@@ -73,6 +74,7 @@ func (h *Helper) NewKcpClient(config *rest.Config, workspacePath string) (client
 	utilruntime.Must(kcpcorev1alpha.AddToScheme(scheme))
 	utilruntime.Must(rbacv1.AddToScheme(scheme))
 	utilruntime.Must(admissionv1.AddToScheme(scheme))
+	utilruntime.Must(providers1alpha1.AddToScheme(scheme))
 
 	cl, err := client.New(config, client.Options{
 		Scheme: scheme,

@@ -71,14 +71,14 @@ func (r *KubeconfigCopySubroutine) Process(ctx context.Context, obj client.Objec
 		return subroutines.OK(), gcerrors.Wrap(err, "failed to build kcp admin config")
 	}
 
-	scopedKubeClient, err := r.kcpHelper.NewKcpClient(restCfg, wsPath)
+	scopedClient, err := r.kcpHelper.NewKcpClient(restCfg, wsPath)
 	if err != nil {
 		return subroutines.OK(), gcerrors.Wrap(err, "failed to create kcp client for provider workspace %s", wsPath)
 	}
 
 	// Fetch the Provider to find the kubeconfig Secret name set by the Provider controller.
 	provider := &providersv1alpha1.Provider{}
-	if err := scopedKubeClient.Get(ctx, types.NamespacedName{Name: inst.Name}, provider); err != nil {
+	if err := scopedClient.Get(ctx, types.NamespacedName{Name: inst.Name}, provider); err != nil {
 		return subroutines.OK(), gcerrors.Wrap(err, "failed to get Provider %s from workspace %s", inst.Name, wsPath)
 	}
 	if provider.Status.KubeconfigSecretRef == nil {
@@ -88,7 +88,7 @@ func (r *KubeconfigCopySubroutine) Process(ctx context.Context, obj client.Objec
 
 	// Fetch the kubeconfig Secret from the provider workspace.
 	kcpSecret := &corev1.Secret{}
-	if err := scopedKubeClient.Get(ctx, types.NamespacedName{Name: provider.Status.KubeconfigSecretRef.Name}, kcpSecret); err != nil {
+	if err := scopedClient.Get(ctx, types.NamespacedName{Name: provider.Status.KubeconfigSecretRef.Name}, kcpSecret); err != nil {
 		return subroutines.OK(), gcerrors.Wrap(err, "failed to get kubeconfig Secret %s from workspace %s", provider.Status.KubeconfigSecretRef.Name, wsPath)
 	}
 
