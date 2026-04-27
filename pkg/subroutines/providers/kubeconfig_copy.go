@@ -85,6 +85,7 @@ func (r *KubeconfigCopySubroutine) Process(ctx context.Context, obj client.Objec
 	}
 	if provider.Status.KubeconfigSecretRef == nil {
 		log.Info().Str("workspace", wsPath).Msg("Provider kubeconfigSecretRef not set yet, requeuing")
+		inst.Status.Phase = "CopyingKubeconfig"
 		return subroutines.StopWithRequeue(kubeconfigCopyRequeueDuration, "waiting for Provider to set kubeconfigSecretRef"), nil
 	}
 
@@ -100,6 +101,7 @@ func (r *KubeconfigCopySubroutine) Process(ctx context.Context, obj client.Objec
 	}
 
 	if len(kcpKubeconfig) == 0 {
+		inst.Status.Phase = "CopyingKubeconfig"
 		return subroutines.StopWithRequeue(kubeconfigCopyRequeueDuration, "waiting for Provider to set kubeconfig in secret"), nil
 	}
 

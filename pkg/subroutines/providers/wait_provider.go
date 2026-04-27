@@ -80,6 +80,7 @@ func (r *WaitProviderSubroutine) Process(ctx context.Context, obj client.Object)
 	if err := scopedClient.Get(ctx, types.NamespacedName{Name: inst.Name}, provider); err != nil {
 		if kerrors.IsNotFound(err) {
 			log.Info().Str("workspace", wsPath).Msg("Provider not found yet, requeuing")
+			inst.Status.Phase = "WaitingForProvider"
 			return subroutines.StopWithRequeue(waitProviderRequeueDuration, "Provider not found yet"), nil
 		}
 		return subroutines.OK(), gcerrors.Wrap(err, "failed to get Provider %s from workspace %s", inst.Name, wsPath)
@@ -87,6 +88,7 @@ func (r *WaitProviderSubroutine) Process(ctx context.Context, obj client.Object)
 
 	if provider.Status.Phase != "Ready" {
 		log.Info().Str("workspace", wsPath).Str("phase", provider.Status.Phase).Msg("Provider not Ready yet, requeuing")
+		inst.Status.Phase = "WaitingForProvider"
 		return subroutines.StopWithRequeue(waitProviderRequeueDuration, "waiting for Provider to become Ready"), nil
 	}
 

@@ -77,6 +77,7 @@ func (r *DeploySubroutine) Process(ctx context.Context, obj client.Object) (subr
 		return subroutines.OK(), err
 	}
 	if !result.IsContinue() {
+		inst.Status.Phase = "DeployingController"
 		return result, nil
 	}
 
@@ -86,10 +87,12 @@ func (r *DeploySubroutine) Process(ctx context.Context, obj client.Object) (subr
 			return subroutines.OK(), err
 		}
 		if !result.IsContinue() {
+			inst.Status.Phase = "DeployingPortal"
 			return result, nil
 		}
 	}
 
+	inst.Status.Phase = "Deployed"
 	return subroutines.OK(), nil
 }
 
