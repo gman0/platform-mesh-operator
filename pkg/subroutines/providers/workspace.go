@@ -25,7 +25,6 @@ import (
 	gcerrors "github.com/platform-mesh/golang-commons/errors"
 	"github.com/platform-mesh/golang-commons/logger"
 	"github.com/platform-mesh/subroutines"
-	kerrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -143,14 +142,14 @@ func (r *WorkspaceSubroutine) Finalize(ctx context.Context, obj client.Object) (
 		return subroutines.OK(), gcerrors.Wrap(err, "failed to build kcp admin config")
 	}
 
-	kcpKubeClient, err := r.kcpHelper.NewKcpClient(restCfg, parentPath)
+	scopedKcpClient, err := r.kcpHelper.NewKcpClient(restCfg, parentPath)
 	if err != nil {
 		return subroutines.OK(), gcerrors.Wrap(err, "failed to create kcp client for parent workspace %s", parentPath)
 	}
 
 	ws := &kcptenancyv1alpha.Workspace{}
 	ws.Name = workspaceName
-	if err = kcpKubeClient.Delete(ctx, ws); err != nil && !kerrors.IsNotFound(err) {
+	if err := client.IgnoreNotFound(scopedKcpClient.Delete(ctx, ws)); err != nil {
 		return subroutines.OK(), gcerrors.Wrap(err, "failed to delete workspace %s", wsPath)
 	}
 

@@ -528,7 +528,11 @@ func BuildKcpAdminConfig(client client.Client, kcpConfig *config.KCPConfig, kcpU
 }
 
 func buildKubeconfigFromConfig(client client.Client, kcpConfig *config.KCPConfig, kcpUrl string) (*rest.Config, error) {
+	fmt.Printf("### kcpConfig.ClusterAdminSecretName=%q\n", kcpConfig.ClusterAdminSecretName)
 	secretName := kcpConfig.ClusterAdminSecretName
+	if secretName == "" {
+		panic("buildKubeconfigFromConfig: kcpConfig.ClusterAdminSecretName is empty")
+	}
 	secret, err := GetSecret(client, secretName, kcpConfig.Namespace)
 	if err != nil {
 		return nil, fmt.Errorf("getting secret %s/platform-mesh-system: %w", secretName, err)

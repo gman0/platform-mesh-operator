@@ -1,0 +1,284 @@
+package providers
+
+import (
+	"context"
+	"errors"
+	"os"
+	"testing"
+
+	"github.com/platform-mesh/golang-commons/context/keys"
+	"github.com/platform-mesh/golang-commons/logger"
+	"github.com/stretchr/testify/mock"
+	"github.com/stretchr/testify/suite"
+	corev1 "k8s.io/api/core/v1"
+	kerrors "k8s.io/apimachinery/pkg/api/errors"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/runtime/schema"
+	"k8s.io/apimachinery/pkg/types"
+	"sigs.k8s.io/controller-runtime/pkg/client"
+
+	providersv1alpha1 "github.com/platform-mesh/platform-mesh-operator/api/providers/v1alpha1"
+	"github.com/platform-mesh/platform-mesh-operator/internal/config"
+	"github.com/platform-mesh/platform-mesh-operator/pkg/subroutines/mocks"
+)
+
+var secretKubeconfigData, _ = os.ReadFile("../test/kubeconfig.yaml")
+
+type KubeconfigCopyTestSuite struct {
+	suite.Suite
+	testObj       *KubeconfigCopySubroutine
+	clientMock    *mocks.Client
+	kcpHelperMock *mocks.KcpHelper
+	kcpClientMock *mocks.Client
+	scheme        *runtime.Scheme
+	log           *logger.Logger
+	operatorCfg   config.OperatorConfig
+}
+
+func TestKubeconfigCopyTestSuite(t *testing.T) {
+	suite.Run(t, new(KubeconfigCopyTestSuite))
+}
+
+func (s *KubeconfigCopyTestSuite) SetupTest() {
+	cfg := logger.DefaultConfig()
+	cfg.Level = "debug"
+	cfg.NoJSON = true
+	cfg.Name = "KubeconfigCopyTestSuite"
+	s.log, _ = logger.New(cfg)
+
+	s.clientMock = new(mocks.Client)
+	s.kcpHelperMock = new(mocks.KcpHelper)
+	s.kcpClientMock = new(mocks.Client)
+
+	s.scheme = runtime.NewScheme()
+	s.clientMock.EXPECT().Scheme().Return(s.scheme).Maybe()
+
+	s.operatorCfg = config.OperatorConfig{}
+	s.operatorCfg.KCP.ClusterAdminSecretName = "kcp-admin"
+	s.operatorCfg.KCP.Namespace = "platform-mesh-system"
+
+	s.testObj = NewKubeconfigCopySubroutine(s.clientMock, s.kcpHelperMock, &s.operatorCfg, "https://kcp.api.example.com")
+}
+
+func (s *KubeconfigCopyTestSuite) TearDownTest() {
+	s.clientMock = nil
+	s.kcpHelperMock = nil
+	s.kcpClientMock = nil
+	s.testObj = nil
+}
+
+func (s *KubeconfigCopyTestSuite) newCtx() context.Context {
+	ctx := context.WithValue(context.Background(), keys.LoggerCtxKey, s.log)
+	return context.WithValue(ctx, keys.ConfigCtxKey, s.operatorCfg)
+}
+
+func (s *KubeconfigCopyTestSuite) newManagedProvider() *providersv1alpha1.ManagedProvider {
+	return &providersv1alpha1.ManagedProvider{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "wildwest",
+			Namespace: "platform-mesh-system",
+		},
+	}
+}
+
+func (s *KubeconfigCopyTestSuite) mockAdminSecret() {
+	s.clientMock.EXPECT().
+		Get(mock.Anything, types.NamespacedName{Name: "kcp-admin", Namespace: "platform-mesh-system"}, mock.AnythingOfType("*v1.Secret")).
+		RunAndReturn(func(ctx context.Context, nn types.NamespacedName, obj client.Object, opts ...client.GetOption) error {
+			secret := obj.(*corev1.Secret)
+			secret.Name = "kcp-admin"
+			secret.Namespace = "platform-mesh-system"
+			secret.Data = map[string][]byte{
+				"ca.crt":  []byte("fake-ca"),
+				"tls.crt": []byte("fake-cert"),
+				"tls.key": []byte("fake-key"),
+			}
+			return nil
+		})
+}
+
+func (s *KubeconfigCopyTestSuite) mockProviderWithSecretRef() {
+	s.kcpClientMock.EXPECT().
+		Get(mock.Anything, types.NamespacedName{Name: "wildwest"}, mock.AnythingOfType("*v1alpha1.Provider")).
+		RunAndReturn(func(ctx context.Context, nn types.NamespacedName, obj client.Object, opts ...client.GetOption) error {
+			provider := obj.(*providersv1alpha1.Provider)
+			provider.Status.KubeconfigSecretRef = &providersv1alpha1.SecretReference{
+				Name:      "wildwest-kubeconfig",
+				Namespace: "platform-mesh-system",
+			}
+			return nil
+		})
+}
+
+func (s *KubeconfigCopyTestSuite) TestProcess_BuildKcpAdminConfigFails() {
+	ctx := s.newCtx()
+	inst := s.newManagedProvider()
+
+	s.clientMock.EXPECT().
+		Get(mock.Anything, types.NamespacedName{Name: "kcp-admin", Namespace: "platform-mesh-system"}, mock.AnythingOfType("*v1.Secret")).
+		Return(errors.New("connection refused"))
+
+	result, err := s.testObj.Process(ctx, inst)
+
+	s.Require().Error(err)
+	s.Assert().True(result.IsContinue())
+	s.Assert().Contains(err.Error(), "failed to build kcp admin config")
+}
+
+func (s *KubeconfigCopyTestSuite) TestProcess_NewKcpClientFails() {
+	ctx := s.newCtx()
+	inst := s.newManagedProvider()
+
+	s.mockAdminSecret()
+	s.kcpHelperMock.EXPECT().
+		NewKcpClient(mock.Anything, "root:providers:wildwest").
+		Return(nil, errors.New("dial error"))
+
+	result, err := s.testObj.Process(ctx, inst)
+
+	s.Require().Error(err)
+	s.Assert().True(result.IsContinue())
+	s.Assert().Contains(err.Error(), "failed to create kcp client")
+}
+
+func (s *KubeconfigCopyTestSuite) TestProcess_KubeconfigSecretRefNotSetYet() {
+	ctx := s.newCtx()
+	inst := s.newManagedProvider()
+
+	s.mockAdminSecret()
+	s.kcpHelperMock.EXPECT().
+		NewKcpClient(mock.Anything, "root:providers:wildwest").
+		Return(s.kcpClientMock, nil)
+	s.kcpClientMock.EXPECT().
+		Get(mock.Anything, types.NamespacedName{Name: "wildwest"}, mock.AnythingOfType("*v1alpha1.Provider")).
+		Return(nil) // Provider found, Status.KubeconfigSecretRef is nil
+
+	result, err := s.testObj.Process(ctx, inst)
+
+	s.Require().NoError(err)
+	s.Assert().True(result.IsStopWithRequeue())
+	s.Assert().Equal("CopyingKubeconfig", inst.Status.Phase)
+}
+
+func (s *KubeconfigCopyTestSuite) TestProcess_KubeconfigSecretGetFails() {
+	ctx := s.newCtx()
+	inst := s.newManagedProvider()
+
+	s.mockAdminSecret()
+	s.kcpHelperMock.EXPECT().
+		NewKcpClient(mock.Anything, "root:providers:wildwest").
+		Return(s.kcpClientMock, nil)
+	s.mockProviderWithSecretRef()
+	s.kcpClientMock.EXPECT().
+		Get(mock.Anything, types.NamespacedName{Name: "wildwest-kubeconfig", Namespace: "platform-mesh-system"}, mock.AnythingOfType("*v1.Secret")).
+		Return(errors.New("secret fetch failed"))
+
+	result, err := s.testObj.Process(ctx, inst)
+
+	s.Require().Error(err)
+	s.Assert().True(result.IsContinue())
+}
+
+func (s *KubeconfigCopyTestSuite) TestProcess_HappyPath() {
+	ctx := s.newCtx()
+	inst := s.newManagedProvider()
+
+	s.mockAdminSecret()
+	s.kcpHelperMock.EXPECT().
+		NewKcpClient(mock.Anything, "root:providers:wildwest").
+		Return(s.kcpClientMock, nil)
+	s.mockProviderWithSecretRef()
+	s.kcpClientMock.EXPECT().
+		Get(mock.Anything, types.NamespacedName{Name: "wildwest-kubeconfig", Namespace: "platform-mesh-system"}, mock.AnythingOfType("*v1.Secret")).
+		RunAndReturn(func(ctx context.Context, nn types.NamespacedName, obj client.Object, opts ...client.GetOption) error {
+			secret := obj.(*corev1.Secret)
+			secret.Data = map[string][]byte{"kubeconfig": secretKubeconfigData}
+			return nil
+		})
+	s.clientMock.EXPECT().
+		Get(mock.Anything, types.NamespacedName{Name: "wildwest-kubeconfig", Namespace: "platform-mesh-system"}, mock.AnythingOfType("*v1.Secret")).
+		Return(kerrors.NewNotFound(schema.GroupResource{Resource: "secrets"}, "wildwest-kubeconfig"))
+	s.clientMock.EXPECT().
+		Create(mock.Anything, mock.AnythingOfType("*v1.Secret"), mock.Anything).
+		Return(nil)
+
+	result, err := s.testObj.Process(ctx, inst)
+
+	s.Require().NoError(err)
+	s.Assert().True(result.IsContinue())
+	s.Require().NotNil(inst.Status.KubeconfigSecretRef)
+	s.Assert().Equal("wildwest-kubeconfig", inst.Status.KubeconfigSecretRef.Name)
+	s.Assert().Equal("platform-mesh-system", inst.Status.KubeconfigSecretRef.Namespace)
+}
+
+func (s *KubeconfigCopyTestSuite) TestProcess_CustomWorkspacePath() {
+	ctx := s.newCtx()
+	inst := s.newManagedProvider()
+	inst.Spec.WorkspacePath = "root:custom:path"
+
+	s.mockAdminSecret()
+	s.kcpHelperMock.EXPECT().
+		NewKcpClient(mock.Anything, "root:custom:path").
+		Return(nil, errors.New("stop here"))
+
+	_, _ = s.testObj.Process(ctx, inst)
+
+	s.kcpHelperMock.AssertExpectations(s.T())
+}
+
+func (s *KubeconfigCopyTestSuite) TestFinalize_NoCleanup() {
+	ctx := s.newCtx()
+	inst := s.newManagedProvider()
+	inst.Spec.CleanupOnDelete = false
+
+	result, err := s.testObj.Finalize(ctx, inst)
+
+	s.Require().NoError(err)
+	s.Assert().True(result.IsContinue())
+}
+
+func (s *KubeconfigCopyTestSuite) TestFinalize_WithCleanup_DeletesSecret() {
+	ctx := s.newCtx()
+	inst := s.newManagedProvider()
+	inst.Spec.CleanupOnDelete = true
+
+	s.clientMock.EXPECT().
+		Delete(mock.Anything, mock.AnythingOfType("*v1.Secret"), mock.Anything).
+		Return(nil)
+
+	result, err := s.testObj.Finalize(ctx, inst)
+
+	s.Require().NoError(err)
+	s.Assert().True(result.IsContinue())
+}
+
+func (s *KubeconfigCopyTestSuite) TestFinalize_WithCleanup_SecretNotFound() {
+	ctx := s.newCtx()
+	inst := s.newManagedProvider()
+	inst.Spec.CleanupOnDelete = true
+
+	s.clientMock.EXPECT().
+		Delete(mock.Anything, mock.AnythingOfType("*v1.Secret"), mock.Anything).
+		Return(kerrors.NewNotFound(schema.GroupResource{Resource: "secrets"}, "wildwest"))
+
+	result, err := s.testObj.Finalize(ctx, inst)
+
+	s.Require().NoError(err)
+	s.Assert().True(result.IsContinue())
+}
+
+func (s *KubeconfigCopyTestSuite) TestFinalize_WithCleanup_DeleteError() {
+	ctx := s.newCtx()
+	inst := s.newManagedProvider()
+	inst.Spec.CleanupOnDelete = true
+
+	s.clientMock.EXPECT().
+		Delete(mock.Anything, mock.AnythingOfType("*v1.Secret"), mock.Anything).
+		Return(errors.New("delete failed"))
+
+	result, err := s.testObj.Finalize(ctx, inst)
+
+	s.Require().Error(err)
+	s.Assert().True(result.IsContinue())
+}

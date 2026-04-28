@@ -22,7 +22,6 @@ import (
 	gcerrors "github.com/platform-mesh/golang-commons/errors"
 	"github.com/platform-mesh/golang-commons/logger"
 	"github.com/platform-mesh/subroutines"
-	kerrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -73,9 +72,7 @@ func (r *ProviderResourceSubroutine) Process(ctx context.Context, obj client.Obj
 		return subroutines.OK(), gcerrors.Wrap(err, "failed to create kcp client for provider workspace %s", wsPath)
 	}
 
-	if err := applyProvider(ctx, scopedClient, inst.Name, func(p *providersv1alpha1.Provider) {
-		p.Spec.HostOverride = "" // TODO
-	}); err != nil {
+	if err := applyProvider(ctx, scopedClient, inst.Name, func(p *providersv1alpha1.Provider) {}); err != nil {
 		return subroutines.Result{}, err
 	}
 
@@ -125,7 +122,7 @@ func (r *ProviderResourceSubroutine) Finalize(ctx context.Context, obj client.Ob
 
 	provider := &providersv1alpha1.Provider{}
 	provider.Name = inst.Name
-	if err = scopedKubeClient.Delete(ctx, provider); err != nil && !kerrors.IsNotFound(err) {
+	if err := client.IgnoreNotFound(scopedKubeClient.Delete(ctx, provider)); err != nil {
 		return subroutines.OK(), gcerrors.Wrap(err, "failed to delete provider %s", provider.Name)
 	}
 

@@ -179,7 +179,6 @@ func (r *ScopedKubeconfigSubroutine) Process(ctx context.Context, obj client.Obj
 		Namespace: providerSANamespace,
 	}
 
-	// TODO: move out if we have more subroutines.
 	inst.Status.Phase = "Ready"
 
 	log.Info().Str("provider", inst.Name).Str("secret", kubeconfigSecretName).Msg("Ensured scoped kubeconfig in provider workspace")
@@ -208,7 +207,7 @@ func (r *ScopedKubeconfigSubroutine) Finalize(ctx context.Context, obj client.Ob
 		&corev1.ServiceAccount{ObjectMeta: metav1.ObjectMeta{Name: saName, Namespace: providerSANamespace}},
 		&corev1.Secret{ObjectMeta: metav1.ObjectMeta{Name: kubeconfigSecretName, Namespace: providerSANamespace}},
 	} {
-		if err := cl.Delete(ctx, res); err != nil && !kerrors.IsNotFound(err) {
+		if err := client.IgnoreNotFound(cl.Delete(ctx, res)); err != nil {
 			return subroutines.OK(), gcerrors.Wrap(err, "delete %T %s", res, res.GetName())
 		}
 	}

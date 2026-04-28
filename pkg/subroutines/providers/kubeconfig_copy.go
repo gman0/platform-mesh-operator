@@ -18,6 +18,7 @@ package providers
 
 import (
 	"context"
+	"fmt"
 	"time"
 
 	gcerrors "github.com/platform-mesh/golang-commons/errors"
@@ -43,18 +44,18 @@ const (
 // Provider controller from the kcp provider workspace into the runtime
 // namespace, and records its name in status.kubeconfigSecretRef.
 type KubeconfigCopySubroutine struct {
-	client    client.Client
-	kcpHelper pmsubs.KcpHelper
-	cfg       *config.OperatorConfig
-	kcpUrl    string
+	client      client.Client
+	kcpHelper   pmsubs.KcpHelper
+	operatorCfg *config.OperatorConfig
+	kcpUrl      string
 }
 
-func NewKubeconfigCopySubroutine(cl client.Client, kcpHelper pmsubs.KcpHelper, cfg *config.OperatorConfig, kcpUrl string) *KubeconfigCopySubroutine {
+func NewKubeconfigCopySubroutine(cl client.Client, kcpHelper pmsubs.KcpHelper, operatorCfg *config.OperatorConfig, kcpUrl string) *KubeconfigCopySubroutine {
 	return &KubeconfigCopySubroutine{
-		client:    cl,
-		kcpHelper: kcpHelper,
-		cfg:       cfg,
-		kcpUrl:    kcpUrl,
+		client:      cl,
+		kcpHelper:   kcpHelper,
+		operatorCfg: operatorCfg,
+		kcpUrl:      kcpUrl,
 	}
 }
 
@@ -68,7 +69,7 @@ func (r *KubeconfigCopySubroutine) Process(ctx context.Context, obj client.Objec
 
 	wsPath := workspacePath(inst)
 
-	restCfg, err := pmsubs.BuildKcpAdminConfig(r.client, &r.cfg.KCP, r.kcpUrl)
+	restCfg, err := pmsubs.BuildKcpAdminConfig(r.client, &r.operatorCfg.KCP, r.kcpUrl)
 	if err != nil {
 		return subroutines.OK(), gcerrors.Wrap(err, "failed to build kcp admin config")
 	}
@@ -89,6 +90,12 @@ func (r *KubeconfigCopySubroutine) Process(ctx context.Context, obj client.Objec
 		return subroutines.StopWithRequeue(kubeconfigCopyRequeueDuration, "waiting for Provider to set kubeconfigSecretRef"), nil
 	}
 
+	fmt.Printf("### provider.Status.KubeconfigSecretRef=%#v\n", provider.Status.KubeconfigSecretRef)
+
+	if provider.Status.KubeconfigSecretRef.Name == "" || provider.Status.KubeconfigSecretRef.Namespace == "" {
+		panic(fmt.Sprintf("provider.Status.KubeconfigSecretRef is not populated! =%#v", provider.Status.KubeconfigSecretRef))
+	}
+
 	// Fetch the kubeconfig Secret from the provider workspace.
 	origSecret := &corev1.Secret{}
 	if err := scopedClient.Get(ctx, types.NamespacedName{Name: provider.Status.KubeconfigSecretRef.Name, Namespace: provider.Status.KubeconfigSecretRef.Namespace}, origSecret); err != nil {
@@ -107,7 +114,7 @@ func (r *KubeconfigCopySubroutine) Process(ctx context.Context, obj client.Objec
 
 	copySecret := corev1.Secret{
 		ObjectMeta: metav1.ObjectMeta{
-			Name:      origSecret.Name,
+			Name:      provider.Status.KubeconfigSecretRef.Name,
 			Namespace: inst.Namespace,
 		},
 		Data: map[string][]byte{
@@ -138,7 +145,15 @@ func (r *KubeconfigCopySubroutine) Finalize(ctx context.Context, obj client.Obje
 		return subroutines.OK(), nil
 	}
 
-	// TODO: delete the runtime kubeconfig Secret via r.client.
+	secret := corev1.Secret{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      inst.Name,
+			Namespace: inst.Namespace,
+		},
+	}
+	if err := client.IgnoreNotFound(r.client.Delete(ctx, &secret)); err != nil {
+		return subroutines.OK(), gcerrors.Wrap(err, "delete %T %s", secret, secret.GetName())
+	}
 
 	return subroutines.OK(), nil
 }
