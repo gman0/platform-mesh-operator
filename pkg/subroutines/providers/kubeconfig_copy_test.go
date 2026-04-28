@@ -76,8 +76,8 @@ func (s *KubeconfigCopyTestSuite) newCtx() context.Context {
 func (s *KubeconfigCopyTestSuite) newManagedProvider() *providersv1alpha1.ManagedProvider {
 	return &providersv1alpha1.ManagedProvider{
 		ObjectMeta: metav1.ObjectMeta{
-			Name:      "wildwest",
-			Namespace: "platform-mesh-system",
+			Name:      "cowboys",
+			Namespace: "providers-wildwest-ns",
 		},
 	}
 }
@@ -100,12 +100,12 @@ func (s *KubeconfigCopyTestSuite) mockAdminSecret() {
 
 func (s *KubeconfigCopyTestSuite) mockProviderWithSecretRef() {
 	s.kcpClientMock.EXPECT().
-		Get(mock.Anything, types.NamespacedName{Name: "wildwest"}, mock.AnythingOfType("*v1alpha1.Provider")).
+		Get(mock.Anything, types.NamespacedName{Name: "cowboys"}, mock.AnythingOfType("*v1alpha1.Provider")).
 		RunAndReturn(func(ctx context.Context, nn types.NamespacedName, obj client.Object, opts ...client.GetOption) error {
 			provider := obj.(*providersv1alpha1.Provider)
 			provider.Status.KubeconfigSecretRef = &providersv1alpha1.SecretReference{
-				Name:      "wildwest-kubeconfig",
-				Namespace: "platform-mesh-system",
+				Name:      "cowboys-kubeconfig",
+				Namespace: "kcp-side-ns",
 			}
 			return nil
 		})
@@ -132,7 +132,7 @@ func (s *KubeconfigCopyTestSuite) TestProcess_NewKcpClientFails() {
 
 	s.mockAdminSecret()
 	s.kcpHelperMock.EXPECT().
-		NewKcpClient(mock.Anything, "root:providers:wildwest").
+		NewKcpClient(mock.Anything, "root:providers:cowboys").
 		Return(nil, errors.New("dial error"))
 
 	result, err := s.testObj.Process(ctx, inst)
@@ -148,10 +148,10 @@ func (s *KubeconfigCopyTestSuite) TestProcess_KubeconfigSecretRefNotSetYet() {
 
 	s.mockAdminSecret()
 	s.kcpHelperMock.EXPECT().
-		NewKcpClient(mock.Anything, "root:providers:wildwest").
+		NewKcpClient(mock.Anything, "root:providers:cowboys").
 		Return(s.kcpClientMock, nil)
 	s.kcpClientMock.EXPECT().
-		Get(mock.Anything, types.NamespacedName{Name: "wildwest"}, mock.AnythingOfType("*v1alpha1.Provider")).
+		Get(mock.Anything, types.NamespacedName{Name: "cowboys"}, mock.AnythingOfType("*v1alpha1.Provider")).
 		Return(nil) // Provider found, Status.KubeconfigSecretRef is nil
 
 	result, err := s.testObj.Process(ctx, inst)
@@ -167,11 +167,11 @@ func (s *KubeconfigCopyTestSuite) TestProcess_KubeconfigSecretGetFails() {
 
 	s.mockAdminSecret()
 	s.kcpHelperMock.EXPECT().
-		NewKcpClient(mock.Anything, "root:providers:wildwest").
+		NewKcpClient(mock.Anything, "root:providers:cowboys").
 		Return(s.kcpClientMock, nil)
 	s.mockProviderWithSecretRef()
 	s.kcpClientMock.EXPECT().
-		Get(mock.Anything, types.NamespacedName{Name: "wildwest-kubeconfig", Namespace: "platform-mesh-system"}, mock.AnythingOfType("*v1.Secret")).
+		Get(mock.Anything, types.NamespacedName{Name: "cowboys-kubeconfig", Namespace: "kcp-side-ns"}, mock.AnythingOfType("*v1.Secret")).
 		Return(errors.New("secret fetch failed"))
 
 	result, err := s.testObj.Process(ctx, inst)
@@ -186,19 +186,19 @@ func (s *KubeconfigCopyTestSuite) TestProcess_HappyPath() {
 
 	s.mockAdminSecret()
 	s.kcpHelperMock.EXPECT().
-		NewKcpClient(mock.Anything, "root:providers:wildwest").
+		NewKcpClient(mock.Anything, "root:providers:cowboys").
 		Return(s.kcpClientMock, nil)
 	s.mockProviderWithSecretRef()
 	s.kcpClientMock.EXPECT().
-		Get(mock.Anything, types.NamespacedName{Name: "wildwest-kubeconfig", Namespace: "platform-mesh-system"}, mock.AnythingOfType("*v1.Secret")).
+		Get(mock.Anything, types.NamespacedName{Name: "cowboys-kubeconfig", Namespace: "kcp-side-ns"}, mock.AnythingOfType("*v1.Secret")).
 		RunAndReturn(func(ctx context.Context, nn types.NamespacedName, obj client.Object, opts ...client.GetOption) error {
 			secret := obj.(*corev1.Secret)
 			secret.Data = map[string][]byte{"kubeconfig": secretKubeconfigData}
 			return nil
 		})
 	s.clientMock.EXPECT().
-		Get(mock.Anything, types.NamespacedName{Name: "wildwest-kubeconfig", Namespace: "platform-mesh-system"}, mock.AnythingOfType("*v1.Secret")).
-		Return(kerrors.NewNotFound(schema.GroupResource{Resource: "secrets"}, "wildwest-kubeconfig"))
+		Get(mock.Anything, types.NamespacedName{Name: "cowboys-kubeconfig", Namespace: "providers-wildwest-ns"}, mock.AnythingOfType("*v1.Secret")).
+		Return(kerrors.NewNotFound(schema.GroupResource{Resource: "secrets"}, "cowboys-kubeconfig"))
 	s.clientMock.EXPECT().
 		Create(mock.Anything, mock.AnythingOfType("*v1.Secret"), mock.Anything).
 		Return(nil)
@@ -208,8 +208,8 @@ func (s *KubeconfigCopyTestSuite) TestProcess_HappyPath() {
 	s.Require().NoError(err)
 	s.Assert().True(result.IsContinue())
 	s.Require().NotNil(inst.Status.KubeconfigSecretRef)
-	s.Assert().Equal("wildwest-kubeconfig", inst.Status.KubeconfigSecretRef.Name)
-	s.Assert().Equal("platform-mesh-system", inst.Status.KubeconfigSecretRef.Namespace)
+	s.Assert().Equal("cowboys-kubeconfig", inst.Status.KubeconfigSecretRef.Name)
+	s.Assert().Equal("providers-wildwest-ns", inst.Status.KubeconfigSecretRef.Namespace)
 }
 
 func (s *KubeconfigCopyTestSuite) TestProcess_CustomWorkspacePath() {
@@ -260,7 +260,7 @@ func (s *KubeconfigCopyTestSuite) TestFinalize_WithCleanup_SecretNotFound() {
 
 	s.clientMock.EXPECT().
 		Delete(mock.Anything, mock.AnythingOfType("*v1.Secret"), mock.Anything).
-		Return(kerrors.NewNotFound(schema.GroupResource{Resource: "secrets"}, "wildwest"))
+		Return(kerrors.NewNotFound(schema.GroupResource{Resource: "secrets"}, "cowboys"))
 
 	result, err := s.testObj.Finalize(ctx, inst)
 
