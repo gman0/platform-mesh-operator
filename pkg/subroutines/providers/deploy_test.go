@@ -74,7 +74,7 @@ func (s *DeployTestSuite) newCtx() context.Context {
 func (s *DeployTestSuite) newManagedProvider() *providersv1alpha1.ManagedProvider {
 	return &providersv1alpha1.ManagedProvider{
 		ObjectMeta: metav1.ObjectMeta{
-			Name:      "wildwest",
+			Name:      "cowboys",
 			Namespace: "providers-wildwest-ns",
 		},
 		Spec: providersv1alpha1.ManagedProviderSpec{
@@ -93,7 +93,7 @@ func (s *DeployTestSuite) newManagedProviderWithPortal() *providersv1alpha1.Mana
 	inst := s.newManagedProvider()
 	inst.Spec.Portal = &providersv1alpha1.ProviderComponentSpec{
 		OCM: providersv1alpha1.OCMComponentSpec{
-			ComponentName: "github.com/platform-mesh/wildwest-portal",
+			ComponentName: "github.com/platform-mesh/cowboys-portal",
 			Version:       "0.1.0",
 			Registry:      "ghcr.io/platform-mesh/ocm",
 		},
@@ -146,8 +146,8 @@ func (s *DeployTestSuite) TestProcess_OCIRepositoryCreateFails() {
 	inst := s.newManagedProvider()
 
 	s.clientMock.EXPECT().
-		Get(mock.Anything, types.NamespacedName{Name: "wildwest-controller", Namespace: "providers-wildwest-ns"}, mock.AnythingOfType("*unstructured.Unstructured")).
-		Return(kerrors.NewNotFound(schema.GroupResource{}, "wildwest-controller")).
+		Get(mock.Anything, types.NamespacedName{Name: "cowboys-controller", Namespace: "providers-wildwest-ns"}, mock.AnythingOfType("*unstructured.Unstructured")).
+		Return(kerrors.NewNotFound(schema.GroupResource{}, "cowboys-controller")).
 		Once()
 	s.clientMock.EXPECT().
 		Create(mock.Anything, mock.AnythingOfType("*unstructured.Unstructured"), mock.Anything).
@@ -165,11 +165,11 @@ func (s *DeployTestSuite) TestProcess_HelmReleaseCreateFails() {
 	ctx := s.newCtx()
 	inst := s.newManagedProvider()
 
-	s.mockCreateOrUpdate("wildwest-controller", "providers-wildwest-ns") // OCIRepository OK
+	s.mockCreateOrUpdate("cowboys-controller", "providers-wildwest-ns") // OCIRepository OK
 	// HelmRelease Get → NotFound, Create → error
 	s.clientMock.EXPECT().
-		Get(mock.Anything, types.NamespacedName{Name: "wildwest-controller", Namespace: "providers-wildwest-ns"}, mock.AnythingOfType("*unstructured.Unstructured")).
-		Return(kerrors.NewNotFound(schema.GroupResource{}, "wildwest-controller")).
+		Get(mock.Anything, types.NamespacedName{Name: "cowboys-controller", Namespace: "providers-wildwest-ns"}, mock.AnythingOfType("*unstructured.Unstructured")).
+		Return(kerrors.NewNotFound(schema.GroupResource{}, "cowboys-controller")).
 		Once()
 	s.clientMock.EXPECT().
 		Create(mock.Anything, mock.AnythingOfType("*unstructured.Unstructured"), mock.Anything).
@@ -187,11 +187,11 @@ func (s *DeployTestSuite) TestProcess_HelmReleaseGetFails() {
 	ctx := s.newCtx()
 	inst := s.newManagedProvider()
 
-	s.mockCreateOrUpdate("wildwest-controller", "providers-wildwest-ns") // OCIRepository OK
-	s.mockCreateOrUpdate("wildwest-controller", "providers-wildwest-ns") // HelmRelease OK
+	s.mockCreateOrUpdate("cowboys-controller", "providers-wildwest-ns") // OCIRepository OK
+	s.mockCreateOrUpdate("cowboys-controller", "providers-wildwest-ns") // HelmRelease OK
 	// helmReleaseReady Get → non-404 error
 	s.clientMock.EXPECT().
-		Get(mock.Anything, types.NamespacedName{Name: "wildwest-controller", Namespace: "providers-wildwest-ns"}, mock.AnythingOfType("*unstructured.Unstructured")).
+		Get(mock.Anything, types.NamespacedName{Name: "cowboys-controller", Namespace: "providers-wildwest-ns"}, mock.AnythingOfType("*unstructured.Unstructured")).
 		Return(errors.New("internal server error")).
 		Once()
 
@@ -206,7 +206,7 @@ func (s *DeployTestSuite) TestProcess_ControllerNotReady() {
 	ctx := s.newCtx()
 	inst := s.newManagedProvider()
 
-	s.mockComponentDeployed("wildwest-controller", "providers-wildwest-ns", false)
+	s.mockComponentDeployed("cowboys-controller", "providers-wildwest-ns", false)
 
 	result, err := s.testObj.Process(ctx, inst)
 
@@ -219,7 +219,7 @@ func (s *DeployTestSuite) TestProcess_ControllerReady_NoPortal() {
 	ctx := s.newCtx()
 	inst := s.newManagedProvider()
 
-	s.mockComponentDeployed("wildwest-controller", "providers-wildwest-ns", true)
+	s.mockComponentDeployed("cowboys-controller", "providers-wildwest-ns", true)
 
 	result, err := s.testObj.Process(ctx, inst)
 
@@ -232,8 +232,8 @@ func (s *DeployTestSuite) TestProcess_ControllerReady_PortalNotReady() {
 	ctx := s.newCtx()
 	inst := s.newManagedProviderWithPortal()
 
-	s.mockComponentDeployed("wildwest-controller", "providers-wildwest-ns", true)
-	s.mockComponentDeployed("wildwest-portal", "providers-wildwest-ns", false)
+	s.mockComponentDeployed("cowboys-controller", "providers-wildwest-ns", true)
+	s.mockComponentDeployed("cowboys-portal", "providers-wildwest-ns", false)
 
 	result, err := s.testObj.Process(ctx, inst)
 
@@ -246,8 +246,8 @@ func (s *DeployTestSuite) TestProcess_ControllerReady_PortalReady() {
 	ctx := s.newCtx()
 	inst := s.newManagedProviderWithPortal()
 
-	s.mockComponentDeployed("wildwest-controller", "providers-wildwest-ns", true)
-	s.mockComponentDeployed("wildwest-portal", "providers-wildwest-ns", true)
+	s.mockComponentDeployed("cowboys-controller", "providers-wildwest-ns", true)
+	s.mockComponentDeployed("cowboys-portal", "providers-wildwest-ns", true)
 
 	result, err := s.testObj.Process(ctx, inst)
 
@@ -260,12 +260,12 @@ func (s *DeployTestSuite) TestProcess_HelmReleaseNotFoundDuringReadyCheck() {
 	ctx := s.newCtx()
 	inst := s.newManagedProvider()
 
-	s.mockCreateOrUpdate("wildwest-controller", "providers-wildwest-ns") // OCIRepository
-	s.mockCreateOrUpdate("wildwest-controller", "providers-wildwest-ns") // HelmRelease
+	s.mockCreateOrUpdate("cowboys-controller", "providers-wildwest-ns") // OCIRepository
+	s.mockCreateOrUpdate("cowboys-controller", "providers-wildwest-ns") // HelmRelease
 	// helmReleaseReady: NotFound → treated as not ready, no error
 	s.clientMock.EXPECT().
-		Get(mock.Anything, types.NamespacedName{Name: "wildwest-controller", Namespace: "providers-wildwest-ns"}, mock.AnythingOfType("*unstructured.Unstructured")).
-		Return(kerrors.NewNotFound(schema.GroupResource{}, "wildwest-controller")).
+		Get(mock.Anything, types.NamespacedName{Name: "cowboys-controller", Namespace: "providers-wildwest-ns"}, mock.AnythingOfType("*unstructured.Unstructured")).
+		Return(kerrors.NewNotFound(schema.GroupResource{}, "cowboys-controller")).
 		Once()
 
 	result, err := s.testObj.Process(ctx, inst)
@@ -284,10 +284,10 @@ func (s *DeployTestSuite) TestProcess_WithHelmValues() {
 
 	// Capture the HelmRelease Create call to verify values are injected.
 	var capturedHR *unstructured.Unstructured
-	s.mockCreateOrUpdate("wildwest-controller", "providers-wildwest-ns") // OCIRepository
+	s.mockCreateOrUpdate("cowboys-controller", "providers-wildwest-ns") // OCIRepository
 	s.clientMock.EXPECT().
-		Get(mock.Anything, types.NamespacedName{Name: "wildwest-controller", Namespace: "providers-wildwest-ns"}, mock.AnythingOfType("*unstructured.Unstructured")).
-		Return(kerrors.NewNotFound(schema.GroupResource{}, "wildwest-controller")).
+		Get(mock.Anything, types.NamespacedName{Name: "cowboys-controller", Namespace: "providers-wildwest-ns"}, mock.AnythingOfType("*unstructured.Unstructured")).
+		Return(kerrors.NewNotFound(schema.GroupResource{}, "cowboys-controller")).
 		Once()
 	s.clientMock.EXPECT().
 		Create(mock.Anything, mock.AnythingOfType("*unstructured.Unstructured"), mock.Anything).
@@ -296,7 +296,7 @@ func (s *DeployTestSuite) TestProcess_WithHelmValues() {
 			return nil
 		}).
 		Once()
-	s.mockHelmReleaseReadyCheck("wildwest-controller", "providers-wildwest-ns", true)
+	s.mockHelmReleaseReadyCheck("cowboys-controller", "providers-wildwest-ns", true)
 
 	result, err := s.testObj.Process(ctx, inst)
 
@@ -314,7 +314,7 @@ func (s *DeployTestSuite) TestProcess_ExistingResourcesUpdated() {
 
 	// OCIRepository already exists → Update
 	s.clientMock.EXPECT().
-		Get(mock.Anything, types.NamespacedName{Name: "wildwest-controller", Namespace: "providers-wildwest-ns"}, mock.AnythingOfType("*unstructured.Unstructured")).
+		Get(mock.Anything, types.NamespacedName{Name: "cowboys-controller", Namespace: "providers-wildwest-ns"}, mock.AnythingOfType("*unstructured.Unstructured")).
 		RunAndReturn(func(ctx context.Context, nn types.NamespacedName, obj client.Object, opts ...client.GetOption) error {
 			u := obj.(*unstructured.Unstructured)
 			u.SetResourceVersion("1")
@@ -327,7 +327,7 @@ func (s *DeployTestSuite) TestProcess_ExistingResourcesUpdated() {
 		Once()
 	// HelmRelease already exists → Update
 	s.clientMock.EXPECT().
-		Get(mock.Anything, types.NamespacedName{Name: "wildwest-controller", Namespace: "providers-wildwest-ns"}, mock.AnythingOfType("*unstructured.Unstructured")).
+		Get(mock.Anything, types.NamespacedName{Name: "cowboys-controller", Namespace: "providers-wildwest-ns"}, mock.AnythingOfType("*unstructured.Unstructured")).
 		RunAndReturn(func(ctx context.Context, nn types.NamespacedName, obj client.Object, opts ...client.GetOption) error {
 			u := obj.(*unstructured.Unstructured)
 			u.SetResourceVersion("2")
@@ -338,7 +338,7 @@ func (s *DeployTestSuite) TestProcess_ExistingResourcesUpdated() {
 		Update(mock.Anything, mock.AnythingOfType("*unstructured.Unstructured"), mock.Anything).
 		Return(nil).
 		Once()
-	s.mockHelmReleaseReadyCheck("wildwest-controller", "providers-wildwest-ns", true)
+	s.mockHelmReleaseReadyCheck("cowboys-controller", "providers-wildwest-ns", true)
 
 	result, err := s.testObj.Process(ctx, inst)
 
@@ -394,11 +394,11 @@ func (s *DeployTestSuite) TestFinalize_NotFound_Ignored() {
 
 	s.clientMock.EXPECT().
 		Delete(mock.Anything, mock.AnythingOfType("*unstructured.Unstructured"), mock.Anything).
-		Return(kerrors.NewNotFound(schema.GroupResource{}, "wildwest-controller")).
+		Return(kerrors.NewNotFound(schema.GroupResource{}, "cowboys-controller")).
 		Once()
 	s.clientMock.EXPECT().
 		Delete(mock.Anything, mock.AnythingOfType("*unstructured.Unstructured"), mock.Anything).
-		Return(kerrors.NewNotFound(schema.GroupResource{}, "wildwest-controller")).
+		Return(kerrors.NewNotFound(schema.GroupResource{}, "cowboys-controller")).
 		Once()
 
 	result, err := s.testObj.Finalize(ctx, inst)

@@ -84,8 +84,8 @@ func (s *ProviderResourceTestSuite) newCtx() context.Context {
 func (s *ProviderResourceTestSuite) newManagedProvider() *providersv1alpha1.ManagedProvider {
 	return &providersv1alpha1.ManagedProvider{
 		ObjectMeta: metav1.ObjectMeta{
-			Name:      "wildwest",
-			Namespace: "platform-mesh-system",
+			Name:      "cowboys",
+			Namespace: "providers-wildwest-ns",
 		},
 	}
 }
@@ -133,7 +133,7 @@ func (s *ProviderResourceTestSuite) TestProcess_NewKcpClientFails() {
 
 	s.mockAdminSecret()
 	s.kcpHelperMock.EXPECT().
-		NewKcpClient(mock.Anything, "root:providers:wildwest").
+		NewKcpClient(mock.Anything, "root:providers:cowboys").
 		Return(nil, errors.New("dial error"))
 
 	result, err := s.testObj.Process(ctx, inst)
@@ -149,7 +149,7 @@ func (s *ProviderResourceTestSuite) TestProcess_ApplyFails() {
 
 	s.mockAdminSecret()
 	s.kcpHelperMock.EXPECT().
-		NewKcpClient(mock.Anything, "root:providers:wildwest").
+		NewKcpClient(mock.Anything, "root:providers:cowboys").
 		Return(s.kcpClientMock, nil)
 	s.kcpClientMock.EXPECT().
 		Apply(mock.Anything, mock.Anything, mock.Anything, mock.Anything).
@@ -168,7 +168,7 @@ func (s *ProviderResourceTestSuite) TestProcess_HappyPath() {
 
 	s.mockAdminSecret()
 	s.kcpHelperMock.EXPECT().
-		NewKcpClient(mock.Anything, "root:providers:wildwest").
+		NewKcpClient(mock.Anything, "root:providers:cowboys").
 		Return(s.kcpClientMock, nil)
 	s.kcpClientMock.EXPECT().
 		Apply(mock.Anything, mock.Anything, mock.Anything, mock.Anything).
@@ -236,7 +236,7 @@ func (s *ProviderResourceTestSuite) TestFinalize_NewKcpClientFails() {
 
 	s.mockAdminSecret()
 	s.kcpHelperMock.EXPECT().
-		NewKcpClient(mock.Anything, "root:providers:wildwest").
+		NewKcpClient(mock.Anything, "root:providers:cowboys").
 		Return(nil, errors.New("dial error"))
 
 	result, err := s.testObj.Finalize(ctx, inst)
@@ -253,7 +253,7 @@ func (s *ProviderResourceTestSuite) TestFinalize_DeleteFails() {
 
 	s.mockAdminSecret()
 	s.kcpHelperMock.EXPECT().
-		NewKcpClient(mock.Anything, "root:providers:wildwest").
+		NewKcpClient(mock.Anything, "root:providers:cowboys").
 		Return(s.kcpClientMock, nil)
 	s.kcpClientMock.EXPECT().
 		Delete(mock.Anything, mock.AnythingOfType("*v1alpha1.Provider"), mock.Anything).
@@ -273,11 +273,11 @@ func (s *ProviderResourceTestSuite) TestFinalize_DeleteNotFound_Ignored() {
 
 	s.mockAdminSecret()
 	s.kcpHelperMock.EXPECT().
-		NewKcpClient(mock.Anything, "root:providers:wildwest").
+		NewKcpClient(mock.Anything, "root:providers:cowboys").
 		Return(s.kcpClientMock, nil)
 	s.kcpClientMock.EXPECT().
 		Delete(mock.Anything, mock.AnythingOfType("*v1alpha1.Provider"), mock.Anything).
-		Return(errors.New("providers.platform-mesh.io \"wildwest\" not found"))
+		Return(errors.New("providers.platform-mesh.io \"cowboys\" not found"))
 
 	// IgnoreNotFound only works with apimachinery NotFound errors;
 	// a plain error is returned as-is, so this is an error case.
@@ -295,7 +295,7 @@ func (s *ProviderResourceTestSuite) TestFinalize_HappyPath() {
 
 	s.mockAdminSecret()
 	s.kcpHelperMock.EXPECT().
-		NewKcpClient(mock.Anything, "root:providers:wildwest").
+		NewKcpClient(mock.Anything, "root:providers:cowboys").
 		Return(s.kcpClientMock, nil)
 	s.kcpClientMock.EXPECT().
 		Delete(mock.Anything, mock.AnythingOfType("*v1alpha1.Provider"), mock.Anything).
