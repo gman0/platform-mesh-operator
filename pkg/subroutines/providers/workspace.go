@@ -36,13 +36,11 @@ import (
 
 const (
 	WorkspaceSubroutineName      = "WorkspaceSubroutine"
-	WorkspaceSubroutineFinalizer = "providers.platform-mesh.io/workspace-finalizer"
+	WorkspaceSubroutineFinalizer = "providers.platform-mesh.io/finalizer"
 
-	defaultWorkspaceParent         = "root:providers"
-	providerWorkspaceTypeName      = "provider"
-	providerWorkspaceTypePath      = "root"
-	providersRootWorkspaceTypeName = "providers"
-	providersRootWorkspaceTypePath = "root"
+	defaultWorkspaceParent    = "root:providers"
+	providerWorkspaceTypeName = "provider"
+	providerWorkspaceTypePath = "root"
 )
 
 // WorkspaceSubroutine creates the provider workspace in kcp under

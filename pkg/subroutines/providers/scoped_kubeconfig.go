@@ -32,7 +32,6 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 	mccontext "sigs.k8s.io/multicluster-runtime/pkg/context"
-	mcmanager "sigs.k8s.io/multicluster-runtime/pkg/manager"
 
 	providersv1alpha1 "github.com/platform-mesh/platform-mesh-operator/api/providers/v1alpha1"
 )
@@ -65,13 +64,14 @@ func providerRoleName(provider *providersv1alpha1.Provider) string {
 // reconciliation step. Runs in the kcp workspace via the VW-aware client.
 type ScopedKubeconfigSubroutine struct {
 	kcpUrl string
-	mgr    mcmanager.Manager
+
+	getClusterClientFromContext func(context.Context) (client.Client, error)
 }
 
-func NewScopedKubeconfigSubroutine(mgr mcmanager.Manager, kcpUrl string) *ScopedKubeconfigSubroutine {
+func NewScopedKubeconfigSubroutine(kcpUrl string, getClusterClientFromContext func(context.Context) (client.Client, error)) *ScopedKubeconfigSubroutine {
 	return &ScopedKubeconfigSubroutine{
-		mgr:    mgr,
-		kcpUrl: kcpUrl,
+		kcpUrl:                      kcpUrl,
+		getClusterClientFromContext: getClusterClientFromContext,
 	}
 }
 
@@ -88,11 +88,10 @@ func (r *ScopedKubeconfigSubroutine) Process(ctx context.Context, obj client.Obj
 	kubeconfigSecretName := providerKubeconfigSecretName(inst)
 	roleName := providerRoleName(inst)
 
-	cluster, err := r.mgr.ClusterFromContext(ctx)
+	cl, err := r.getClusterClientFromContext(ctx)
 	if err != nil {
 		return subroutines.OK(), err
 	}
-	cl := cluster.GetClient()
 	clusterName, ok := mccontext.ClusterFrom(ctx)
 	if !ok {
 		return subroutines.OK(), fmt.Errorf("failed to get cluster from context")
@@ -189,11 +188,10 @@ func (r *ScopedKubeconfigSubroutine) Finalize(ctx context.Context, obj client.Ob
 	inst := obj.(*providersv1alpha1.Provider)
 	log := logger.LoadLoggerFromContext(ctx).ChildLogger("subroutine", r.GetName())
 
-	cluster, err := r.mgr.ClusterFromContext(ctx)
+	cl, err := r.getClusterClientFromContext(ctx)
 	if err != nil {
 		return subroutines.OK(), err
 	}
-	cl := cluster.GetClient()
 
 	saName := providerServiceAccountName(inst)
 	tokenSecretName := providerServiceAccountTokenSecretName(inst)

@@ -86,7 +86,13 @@ func NewProviderReconciler(mgr mcmanager.Manager, providersCfg *config.Providers
 	}
 
 	subs := []subroutines.Subroutine{
-		pmsubs.NewScopedKubeconfigSubroutine(mgr, kcpUrl),
+		pmsubs.NewScopedKubeconfigSubroutine(kcpUrl, func(ctx context.Context) (client.Client, error) {
+			cluster, err := mgr.ClusterFromContext(ctx)
+			if err != nil {
+				return nil, err
+			}
+			return cluster.GetClient(), nil
+		}),
 	}
 
 	lc := lifecycle.New(mgr, ProviderControllerName, func() client.Object {

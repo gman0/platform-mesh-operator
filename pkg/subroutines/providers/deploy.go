@@ -195,6 +195,8 @@ func (r *DeploySubroutine) helmReleaseReady(ctx context.Context, namespace, name
 func (r *DeploySubroutine) Finalize(ctx context.Context, obj client.Object) (subroutines.Result, error) {
 	inst := obj.(*providersv1alpha1.ManagedProvider)
 
+	inst.Status.Phase = "Deleting"
+
 	names := []string{inst.Name + "-controller"}
 	if inst.Spec.Portal != nil {
 		names = append(names, inst.Name+"-portal")
