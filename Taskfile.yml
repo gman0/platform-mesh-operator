@@ -120,7 +120,7 @@ tasks:
               }
             else
               export PATH=$(pwd)/{{.LOCAL_BIN}}:$PATH
-              go test -timeout 30m -coverprofile=cover.out ./... {{.ADDITIONAL_COMMAND_ARGS}}
+              go test -timeout 30m -coverprofile=cover.out -v ./... {{.ADDITIONAL_COMMAND_ARGS}}
             fi
         ignore_error: false
 

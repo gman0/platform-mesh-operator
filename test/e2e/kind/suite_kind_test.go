@@ -29,6 +29,7 @@ import (
 	ctrl "sigs.k8s.io/controller-runtime"
 	mcmanager "sigs.k8s.io/multicluster-runtime/pkg/manager"
 
+	providersv1alpha1 "github.com/platform-mesh/platform-mesh-operator/api/providers/v1alpha1"
 	"github.com/platform-mesh/platform-mesh-operator/api/v1alpha1"
 	"github.com/platform-mesh/platform-mesh-operator/pkg/kapply"
 
@@ -39,6 +40,7 @@ import (
 
 	"github.com/platform-mesh/platform-mesh-operator/internal/config"
 	"github.com/platform-mesh/platform-mesh-operator/internal/controller"
+	// providercontrollers "github.com/platform-mesh/platform-mesh-operator/internal/controller/providers"
 	metricsserver "sigs.k8s.io/controller-runtime/pkg/metrics/server"
 )
 
@@ -49,6 +51,8 @@ type KindTestSuite struct {
 	config *rest.Config
 	scheme *runtime.Scheme
 	logger *logger.Logger
+
+	containerRuntime string
 
 	cancel context.CancelFunc
 }
@@ -119,6 +123,26 @@ func (s *KindTestSuite) createLogger() error {
 
 }
 
+func (s *KindTestSuite) detectContainerRuntime() error {
+	s.logger.Info().Msg("Checking whether Docker is available...")
+	_, err := runCommand("docker", "--version")
+	if err == nil {
+		s.logger.Info().Msg("Docker found")
+		s.containerRuntime = "docker"
+		return nil
+	}
+
+	s.logger.Info().Msg("Checking whether Podman is available...")
+	_, err = runCommand("podman", "--version")
+	if err == nil {
+		s.logger.Info().Msg("Podman found")
+		s.containerRuntime = "podman"
+		return nil
+	}
+
+	return fmt.Errorf("no container runtime found in PATH: install Docker or Podman")
+}
+
 func (s *KindTestSuite) createKindCluster() error {
 	// Check if Kind cluster already exists if not create it
 	s.logger.Info().Msg("Checking if Kind cluster exists...")
@@ -132,11 +156,11 @@ func (s *KindTestSuite) createKindCluster() error {
 		s.logger.Info().Msg("Kind cluster already exists, skipping creation")
 	} else {
 		s.logger.Info().Msg("Creating Kind cluster...")
-		if out, err := runCommand("docker", "system", "prune", "-f"); err != nil {
+		if out, err := runCommand(s.containerRuntime, "system", "prune", "-f"); err != nil {
 			return errors.Join(err, errors.New(string(out)))
 		}
 
-		if out, err := runCommand("docker", "ps", "-a"); err != nil {
+		if out, err := runCommand(s.containerRuntime, "ps", "-a"); err != nil {
 			return errors.Join(err, errors.New(string(out)))
 		}
 
@@ -167,6 +191,7 @@ func (s *KindTestSuite) createKindCluster() error {
 	utilruntime.Must(fluxcdv1.AddToScheme(s.scheme))
 	utilruntime.Must(fluxcdv2.AddToScheme(s.scheme))
 	utilruntime.Must(apiextensionsv1.AddToScheme(s.scheme))
+	utilruntime.Must(providersv1alpha1.AddToScheme(s.scheme))
 
 	gvk := fluxcdv2.GroupVersion.WithKind("HelmRelease")
 	s.logger.Info().Msgf("Registering GVK: %s", gvk.String())
@@ -388,6 +413,10 @@ func (s *KindTestSuite) SetupSuite() {
 		s.logger.Error().Err(err).Msg("Failed to create logger")
 		s.T().FailNow()
 	}
+	if err = s.detectContainerRuntime(); err != nil {
+		s.logger.Error().Err(err).Msg("Failed to detect container runtime")
+		s.T().FailNow()
+	}
 	if err = s.createKindCluster(); err != nil {
 		s.logger.Error().Err(err).Msg("Failed to create Kind cluster")
 		s.T().FailNow()
@@ -524,7 +553,16 @@ func (s *KindTestSuite) InstallCRDs(ctx context.Context) error {
 		return err
 	}
 
-	// Add more CRD installations here if needed
+	if err := ApplyManifestFromFile(ctx, "../../../config/crd/providers.platform-mesh.io_providers.yaml", s.client, make(map[string]string)); err != nil {
+		s.logger.Error().Err(err).Msg("Failed to apply Provider CRD manifest")
+		return err
+	}
+
+	if err := ApplyManifestFromFile(ctx, "../../../config/crd/providers.platform-mesh.io_managedproviders.yaml", s.client, make(map[string]string)); err != nil {
+		s.logger.Error().Err(err).Msg("Failed to apply ManagedProvider CRD manifest")
+		return err
+	}
+
 	return nil
 }
 
@@ -589,6 +627,26 @@ func (s *KindTestSuite) runOperator(ctx context.Context) {
 		s.logger.Error().Err(err).Msg("unable to create resource controller")
 		return
 	}
+
+	// ManagedProvider: enable only workspace and provider-resource steps; the
+	// remaining steps (WaitProvider, KubeconfigCopy, Deploy) require the full
+	// Provider controller + VirtualWorkspace setup which is out of scope for
+	// the kind e2e suite.
+	/*appConfig.Subroutines.ManagedProvider.Workspace.Enabled = true
+	appConfig.Subroutines.ManagedProvider.ProviderResource.Enabled = true
+	appConfig.Subroutines.ManagedProvider.WaitProvider.Enabled = false
+	appConfig.Subroutines.ManagedProvider.KubeconfigCopy.Enabled = false
+	appConfig.Subroutines.ManagedProvider.Deploy.Enabled = false
+
+	managedProviderReconciler, err := providercontrollers.NewManagedProviderReconciler(s.kubernetesManager, &appConfig, commonConfig)
+	if err != nil {
+		s.logger.Error().Err(err).Msg("unable to create ManagedProvider reconciler")
+		return
+	}
+	if err := managedProviderReconciler.SetupWithManager(s.kubernetesManager, commonConfig); err != nil {
+		s.logger.Error().Err(err).Msg("unable to setup ManagedProvider controller")
+		return
+	}*/
 
 	go s.startController()
 	s.logger.Info().Msg("PlatformMesh operator started")
