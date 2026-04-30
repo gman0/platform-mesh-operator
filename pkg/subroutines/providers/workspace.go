@@ -36,7 +36,7 @@ import (
 
 const (
 	WorkspaceSubroutineName      = "WorkspaceSubroutine"
-	WorkspaceSubroutineFinalizer = "providers.platform-mesh.io/finalizer"
+	WorkspaceSubroutineFinalizer = "providers.platform-mesh.io/workspace-finalizer"
 
 	defaultWorkspaceParent    = "root:providers"
 	providerWorkspaceTypeName = "provider"

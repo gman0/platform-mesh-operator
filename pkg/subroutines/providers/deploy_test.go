@@ -443,8 +443,3 @@ func (s *DeployTestSuite) TestFinalize_OCIRepoDeleteFails() {
 	s.Assert().True(result.IsContinue())
 	s.Assert().Contains(err.Error(), "failed to delete OCIRepository")
 }
-
-func (s *DeployTestSuite) TestFinalizers_Empty() {
-	inst := s.newManagedProvider()
-	s.Assert().Empty(s.testObj.Finalizers(inst))
-}

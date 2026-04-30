@@ -37,6 +37,7 @@ import (
 
 const (
 	KubeconfigCopySubroutineName  = "KubeconfigCopySubroutine"
+	kubeconfigCopyFinalizer       = "providers.platform-mesh.io/kubeconfig-copy-finalizer"
 	kubeconfigCopyRequeueDuration = 10 * time.Second
 )
 
@@ -141,13 +142,13 @@ func (r *KubeconfigCopySubroutine) Process(ctx context.Context, obj client.Objec
 
 func (r *KubeconfigCopySubroutine) Finalize(ctx context.Context, obj client.Object) (subroutines.Result, error) {
 	inst := obj.(*providersv1alpha1.ManagedProvider)
-	if !inst.Spec.CleanupOnDelete {
+	if inst.Status.KubeconfigSecretRef == nil {
 		return subroutines.OK(), nil
 	}
 
 	secret := corev1.Secret{
 		ObjectMeta: metav1.ObjectMeta{
-			Name:      inst.Name,
+			Name:      inst.Status.KubeconfigSecretRef.Name,
 			Namespace: inst.Namespace,
 		},
 	}
@@ -159,5 +160,5 @@ func (r *KubeconfigCopySubroutine) Finalize(ctx context.Context, obj client.Obje
 }
 
 func (r *KubeconfigCopySubroutine) Finalizers(_ client.Object) []string {
-	return []string{}
+	return []string{kubeconfigCopyFinalizer}
 }

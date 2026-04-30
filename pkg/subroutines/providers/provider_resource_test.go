@@ -306,8 +306,3 @@ func (s *ProviderResourceTestSuite) TestFinalize_HappyPath() {
 	s.Require().NoError(err)
 	s.Assert().True(result.IsContinue())
 }
-
-func (s *ProviderResourceTestSuite) TestFinalizers_Empty() {
-	inst := s.newManagedProvider()
-	s.Assert().Empty(s.testObj.Finalizers(inst))
-}

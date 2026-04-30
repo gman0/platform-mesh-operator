@@ -36,8 +36,9 @@ import (
 )
 
 const (
-	DeploySubroutineName  = "DeploySubroutine"
-	deployRequeueDuration = 10 * time.Second
+	DeploySubroutineName      = "DeploySubroutine"
+	deploySubroutineFinalizer = "providers.platform-mesh.io/deploy-finalizer"
+	deployRequeueDuration     = 10 * time.Second
 )
 
 var (
@@ -224,5 +225,5 @@ func (r *DeploySubroutine) Finalize(ctx context.Context, obj client.Object) (sub
 }
 
 func (r *DeploySubroutine) Finalizers(_ client.Object) []string {
-	return []string{}
+	return []string{deploySubroutineFinalizer}
 }

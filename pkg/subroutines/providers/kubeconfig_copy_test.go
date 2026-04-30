@@ -243,10 +243,10 @@ func (s *KubeconfigCopyTestSuite) TestProcess_CustomWorkspacePath() {
 	s.kcpHelperMock.AssertExpectations(s.T())
 }
 
-func (s *KubeconfigCopyTestSuite) TestFinalize_NoCleanup() {
+func (s *KubeconfigCopyTestSuite) TestFinalize_NilKubeconfigRef() {
+	// No KubeconfigSecretRef set (provider never reached Ready) → no-op.
 	ctx := s.newCtx()
 	inst := s.newManagedProvider()
-	inst.Spec.CleanupOnDelete = false
 
 	result, err := s.testObj.Finalize(ctx, inst)
 
@@ -254,10 +254,13 @@ func (s *KubeconfigCopyTestSuite) TestFinalize_NoCleanup() {
 	s.Assert().True(result.IsContinue())
 }
 
-func (s *KubeconfigCopyTestSuite) TestFinalize_WithCleanup_DeletesSecret() {
+func (s *KubeconfigCopyTestSuite) TestFinalize_DeletesSecret() {
 	ctx := s.newCtx()
 	inst := s.newManagedProvider()
-	inst.Spec.CleanupOnDelete = true
+	inst.Status.KubeconfigSecretRef = &providersv1alpha1.SecretReference{
+		Name:      "platform-mesh-provider-kubeconfig-cowboys",
+		Namespace: inst.Namespace,
+	}
 
 	s.clientMock.EXPECT().
 		Delete(mock.Anything, mock.AnythingOfType("*v1.Secret"), mock.Anything).
@@ -269,14 +272,17 @@ func (s *KubeconfigCopyTestSuite) TestFinalize_WithCleanup_DeletesSecret() {
 	s.Assert().True(result.IsContinue())
 }
 
-func (s *KubeconfigCopyTestSuite) TestFinalize_WithCleanup_SecretNotFound() {
+func (s *KubeconfigCopyTestSuite) TestFinalize_SecretNotFound() {
 	ctx := s.newCtx()
 	inst := s.newManagedProvider()
-	inst.Spec.CleanupOnDelete = true
+	inst.Status.KubeconfigSecretRef = &providersv1alpha1.SecretReference{
+		Name:      "platform-mesh-provider-kubeconfig-cowboys",
+		Namespace: inst.Namespace,
+	}
 
 	s.clientMock.EXPECT().
 		Delete(mock.Anything, mock.AnythingOfType("*v1.Secret"), mock.Anything).
-		Return(kerrors.NewNotFound(schema.GroupResource{Resource: "secrets"}, "cowboys"))
+		Return(kerrors.NewNotFound(schema.GroupResource{Resource: "secrets"}, "platform-mesh-provider-kubeconfig-cowboys"))
 
 	result, err := s.testObj.Finalize(ctx, inst)
 
@@ -284,10 +290,13 @@ func (s *KubeconfigCopyTestSuite) TestFinalize_WithCleanup_SecretNotFound() {
 	s.Assert().True(result.IsContinue())
 }
 
-func (s *KubeconfigCopyTestSuite) TestFinalize_WithCleanup_DeleteError() {
+func (s *KubeconfigCopyTestSuite) TestFinalize_DeleteError() {
 	ctx := s.newCtx()
 	inst := s.newManagedProvider()
-	inst.Spec.CleanupOnDelete = true
+	inst.Status.KubeconfigSecretRef = &providersv1alpha1.SecretReference{
+		Name:      "platform-mesh-provider-kubeconfig-cowboys",
+		Namespace: inst.Namespace,
+	}
 
 	s.clientMock.EXPECT().
 		Delete(mock.Anything, mock.AnythingOfType("*v1.Secret"), mock.Anything).
