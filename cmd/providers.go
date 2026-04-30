@@ -99,8 +99,6 @@ func RunProviders(_ *cobra.Command, _ []string) { // coverage-ignore
 		}
 	}()
 
-	log.Info().Msgf("Has config: %#v", providersCfg)
-
 	log.Info().Msg("Starting manager")
 
 	restCfg := ctrl.GetConfigOrDie()

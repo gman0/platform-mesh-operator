@@ -12,6 +12,7 @@ import (
 
 	certmanager "github.com/cert-manager/cert-manager/pkg/apis/certmanager/v1"
 	"github.com/creasty/defaults"
+	"github.com/kcp-dev/multicluster-provider/apiexport"
 	"github.com/platform-mesh/golang-commons/context/keys"
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
@@ -40,12 +41,14 @@ import (
 
 	"github.com/platform-mesh/platform-mesh-operator/internal/config"
 	"github.com/platform-mesh/platform-mesh-operator/internal/controller"
-	// providercontrollers "github.com/platform-mesh/platform-mesh-operator/internal/controller/providers"
+	"github.com/platform-mesh/platform-mesh-operator/internal/controller/providers"
+	pmsubs "github.com/platform-mesh/platform-mesh-operator/pkg/subroutines"
+
 	metricsserver "sigs.k8s.io/controller-runtime/pkg/metrics/server"
 )
 
 type KindTestSuite struct {
-	kubernetesManager mcmanager.Manager
+	pmOperatorManager mcmanager.Manager
 	suite.Suite
 	client client.Client
 	config *rest.Config
@@ -482,9 +485,12 @@ func (s *KindTestSuite) SetupSuite() {
 	}
 
 	// Run the PlatformMesh operator
-	s.logger.Info().Msg("starting operator...")
-	s.runOperator(ctx)
+	s.logger.Info().Msg("starting PlatformMesh operator...")
+	s.runPlatformMeshOperator(ctx)
 
+	// Run the Providers operator
+	s.logger.Info().Msg("starting Providers operator...")
+	s.runProviderOperator(ctx)
 }
 
 func (s *KindTestSuite) waitForCRDEstablished(ctx context.Context, crdName string, timeout time.Duration) error {
@@ -553,11 +559,6 @@ func (s *KindTestSuite) InstallCRDs(ctx context.Context) error {
 		return err
 	}
 
-	if err := ApplyManifestFromFile(ctx, "../../../config/crd/providers.platform-mesh.io_providers.yaml", s.client, make(map[string]string)); err != nil {
-		s.logger.Error().Err(err).Msg("Failed to apply Provider CRD manifest")
-		return err
-	}
-
 	if err := ApplyManifestFromFile(ctx, "../../../config/crd/providers.platform-mesh.io_managedproviders.yaml", s.client, make(map[string]string)); err != nil {
 		s.logger.Error().Err(err).Msg("Failed to apply ManagedProvider CRD manifest")
 		return err
@@ -566,13 +567,13 @@ func (s *KindTestSuite) InstallCRDs(ctx context.Context) error {
 	return nil
 }
 
-func (s *KindTestSuite) runOperator(ctx context.Context) {
+func (s *KindTestSuite) runPlatformMeshOperator(ctx context.Context) {
 
 	appConfig := config.NewOperatorConfig()
 
 	err := defaults.Set(&appConfig)
 	if err != nil {
-		s.logger.Error().Err(err).Msg("Failed to set default operator config")
+		s.logger.Error().Err(err).Msg("Failed to set default PlatformMesh operator config")
 		return
 	}
 
@@ -606,24 +607,24 @@ func (s *KindTestSuite) runOperator(ctx context.Context) {
 		return
 	}
 
-	s.kubernetesManager = mgr
+	s.pmOperatorManager = mgr
 
-	pmReconciler, err := controller.NewPlatformMeshReconciler(s.kubernetesManager, &appConfig, commonConfig, "../../../")
+	pmReconciler, err := controller.NewPlatformMeshReconciler(s.pmOperatorManager, &appConfig, commonConfig, "../../../")
 	if err != nil {
 		s.logger.Error().Err(err).Msg("Failed to create PlatformMesh reconciler")
 		return
 	}
-	if err := pmReconciler.SetupWithManager(s.kubernetesManager, commonConfig); err != nil {
+	if err := pmReconciler.SetupWithManager(s.pmOperatorManager, commonConfig); err != nil {
 		s.logger.Error().Err(err).Msg("Failed to setup PlatformMesh reconciler with manager")
 		return
 	}
 
-	resourceReconciler, err := controller.NewResourceReconciler(s.kubernetesManager, &appConfig)
+	resourceReconciler, err := controller.NewResourceReconciler(s.pmOperatorManager, &appConfig)
 	if err != nil {
 		s.logger.Error().Err(err).Msg("unable to create Resource reconciler")
 		return
 	}
-	if err := resourceReconciler.SetupWithManager(s.kubernetesManager, commonConfig); err != nil {
+	if err := resourceReconciler.SetupWithManager(s.pmOperatorManager, commonConfig); err != nil {
 		s.logger.Error().Err(err).Msg("unable to create resource controller")
 		return
 	}
@@ -648,13 +649,74 @@ func (s *KindTestSuite) runOperator(ctx context.Context) {
 		return
 	}*/
 
-	go s.startController()
+	go func() {
+		var controllerContext context.Context
+		controllerContext, s.cancel = context.WithCancel(context.Background())
+		err := s.pmOperatorManager.Start(controllerContext)
+		s.Nil(err)
+	}()
 	s.logger.Info().Msg("PlatformMesh operator started")
 }
 
-func (suite *KindTestSuite) startController() {
-	var controllerContext context.Context
-	controllerContext, suite.cancel = context.WithCancel(context.Background())
-	err := suite.kubernetesManager.Start(controllerContext)
-	suite.Nil(err)
+func (s *KindTestSuite) runProviderOperator(ctx context.Context) {
+	appConfig := config.NewProvidersConfig()
+	if err := defaults.Set(&appConfig); err != nil {
+		s.logger.Error().Err(err).Msg("Failed to set default Provider operator config")
+		return
+	}
+
+	appConfig.ProvidersAPIExportEndpointSliceName = "providers.platform-mesh.io"
+	appConfig.ProvidersAPIExportEndpointSliceWorkspace = "root:platform-mesh-system"
+	appConfig.KCP.Url = "https://localhost:8443"
+	appConfig.KCP.RootShardName = "root"
+	appConfig.KCP.Namespace = "platform-mesh-system"
+	appConfig.KCP.FrontProxyName = "frontproxy"
+	appConfig.KCP.FrontProxyPort = "6443"
+	appConfig.KCP.ClusterAdminSecretName = "kcp-cluster-admin-client-cert"
+
+	commonConfig := &pmconfig.CommonServiceConfig{}
+	commonConfig.IsLocal = true
+
+	ctx = context.WithValue(ctx, keys.ConfigCtxKey, appConfig)
+
+	runtimeClient, err := client.New(s.config, client.Options{})
+	s.NoError(err, "failed to create kube client for runtime cluster")
+
+	var kcpAdminCfg *rest.Config
+	s.Eventually(func() bool {
+		kcpAdminCfg, err = pmsubs.BuildKcpAdminConfig(runtimeClient, &appConfig.KCP, appConfig.KCP.Url)
+		return err == nil
+	}, 240*time.Second, 5*time.Second, "waiting for kcp REST config")
+
+	scopedKcpAdminCfg := rest.CopyConfig(kcpAdminCfg)
+	scopedKcpAdminCfg.Host += "/clusters/" + appConfig.ProvidersAPIExportEndpointSliceWorkspace
+
+	providersVW, err := apiexport.New(scopedKcpAdminCfg, appConfig.ProvidersAPIExportEndpointSliceName, apiexport.Options{
+		Scheme: s.scheme,
+	})
+	s.NoError(err, "failed to create APIExport mc provider")
+
+	mgr, err := mcmanager.New(s.config, providersVW, ctrl.Options{
+		Scheme:      s.scheme,
+		BaseContext: func() context.Context { return ctx },
+		Metrics: metricsserver.Options{
+			BindAddress: "0",
+		},
+	})
+	if err != nil {
+		s.logger.Error().Err(err).Msg("Failed to create manager")
+		return
+	}
+
+	rec, err := providers.NewProviderReconciler(mgr, &appConfig, commonConfig)
+	s.NoError(err, "failed to ProviderReconciler controller")
+	s.NoError(rec.SetupWithManager(mgr, commonConfig), "failed to setup ProviderReconciler with manager")
+
+	go func() {
+		var controllerContext context.Context
+		controllerContext, s.cancel = context.WithCancel(context.Background())
+		err := mgr.Start(controllerContext)
+		s.Nil(err)
+	}()
+	s.logger.Info().Msg("PlatformMesh operator started")
 }
