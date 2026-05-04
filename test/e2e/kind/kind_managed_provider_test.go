@@ -43,7 +43,18 @@ func (s *KindTestSuite) TestManagedProvider() {
 		err = s.client.Create(ctx, &ns)
 		s.NoError(err, "creating namespace for a ManagedProvider should succeed")
 		s.T().Cleanup(func() {
-			// s.client.Delete(s.T().Context(), &ns)
+			cleanupCtx := context.Background()
+			mpList := &providersv1alpha1.ManagedProviderList{}
+			if err := s.client.List(cleanupCtx, mpList, client.InNamespace(ns.Name)); err == nil {
+				for i := range mpList.Items {
+					mp := &mpList.Items[i]
+					patch := client.MergeFrom(mp.DeepCopy())
+					mp.Finalizers = nil
+					_ = s.client.Patch(cleanupCtx, mp, patch)
+					_ = client.IgnoreNotFound(s.client.Delete(cleanupCtx, mp))
+				}
+			}
+			_ = client.IgnoreNotFound(s.client.Delete(cleanupCtx, &ns))
 		})
 		s.logger.Info().Msgf("Namespace %q created", ns.Name)
 
