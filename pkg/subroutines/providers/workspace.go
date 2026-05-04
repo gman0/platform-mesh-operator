@@ -91,7 +91,7 @@ func (r *WorkspaceSubroutine) Process(ctx context.Context, obj client.Object) (s
 		workspaceName, wsPath,
 		providerWorkspaceTypeName, providerWorkspaceTypePath,
 	); err != nil {
-		return subroutines.Result{}, err
+		return subroutines.OK(), err
 	}
 
 	log.Info().Str("workspace", wsPath).Msg("Ensured provider workspace")
