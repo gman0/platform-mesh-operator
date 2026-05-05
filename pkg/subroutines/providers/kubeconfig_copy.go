@@ -18,7 +18,6 @@ package providers
 
 import (
 	"context"
-	"fmt"
 	"time"
 
 	gcerrors "github.com/platform-mesh/golang-commons/errors"
@@ -89,10 +88,6 @@ func (r *KubeconfigCopySubroutine) Process(ctx context.Context, obj client.Objec
 		log.Info().Str("workspace", wsPath).Msg("Provider kubeconfigSecretRef not set yet, requeuing")
 		inst.Status.Phase = "CopyingKubeconfig"
 		return subroutines.StopWithRequeue(kubeconfigCopyRequeueDuration, "waiting for Provider to set kubeconfigSecretRef"), nil
-	}
-
-	if provider.Status.KubeconfigSecretRef.Name == "" || provider.Status.KubeconfigSecretRef.Namespace == "" {
-		panic(fmt.Sprintf("provider.Status.KubeconfigSecretRef is not populated! =%#v", provider.Status.KubeconfigSecretRef))
 	}
 
 	// Fetch the kubeconfig Secret from the provider workspace.
