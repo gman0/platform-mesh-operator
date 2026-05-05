@@ -12,7 +12,7 @@ import (
 
 	certmanager "github.com/cert-manager/cert-manager/pkg/apis/certmanager/v1"
 	"github.com/creasty/defaults"
-	"github.com/kcp-dev/multicluster-provider/apiexport"
+	kcptenancyv1alpha "github.com/kcp-dev/kcp/sdk/apis/tenancy/v1alpha1"
 	kcpapisv1alpha1 "github.com/kcp-dev/sdk/apis/apis/v1alpha1"
 	kcpapisv1alpha2 "github.com/kcp-dev/sdk/apis/apis/v1alpha2"
 	"github.com/platform-mesh/golang-commons/context/keys"
@@ -45,7 +45,6 @@ import (
 	"github.com/platform-mesh/platform-mesh-operator/internal/config"
 	"github.com/platform-mesh/platform-mesh-operator/internal/controller"
 	providerscontroller "github.com/platform-mesh/platform-mesh-operator/internal/controller/providers"
-	pmsubs "github.com/platform-mesh/platform-mesh-operator/pkg/subroutines"
 
 	metricsserver "sigs.k8s.io/controller-runtime/pkg/metrics/server"
 )
@@ -209,6 +208,7 @@ func (s *KindTestSuite) createKindCluster() error {
 	utilruntime.Must(providersv1alpha1.AddToScheme(s.scheme))
 	utilruntime.Must(kcpapisv1alpha1.AddToScheme(s.scheme))
 	utilruntime.Must(kcpapisv1alpha2.AddToScheme(s.scheme))
+	utilruntime.Must(kcptenancyv1alpha.AddToScheme(s.scheme))
 
 	gvk := fluxcdv2.GroupVersion.WithKind("HelmRelease")
 	s.logger.Info().Msgf("Registering GVK: %s", gvk.String())
@@ -501,10 +501,6 @@ func (s *KindTestSuite) SetupSuite() {
 	// Run the PlatformMesh operator
 	s.logger.Info().Msg("starting PlatformMesh operator...")
 	s.runPlatformMeshOperator(ctx)
-
-	// Run the Providers operator
-	s.logger.Info().Msg("starting Providers operator...")
-	s.runProviderOperator(ctx)
 }
 
 func (s *KindTestSuite) waitForCRDEstablished(ctx context.Context, crdName string, timeout time.Duration) error {
@@ -656,64 +652,6 @@ func (s *KindTestSuite) runPlatformMeshOperator(ctx context.Context) {
 		var controllerContext context.Context
 		controllerContext, s.cancel = context.WithCancel(context.Background())
 		err := mgr.Start(controllerContext)
-		s.Nil(err)
-	}()
-	s.logger.Info().Msg("PlatformMesh operator started")
-}
-
-func (s *KindTestSuite) runProviderOperator(ctx context.Context) {
-	appConfig := config.NewProvidersConfig()
-	if err := defaults.Set(&appConfig); err != nil {
-		s.logger.Error().Err(err).Msg("Failed to set default Provider operator config")
-		return
-	}
-
-	appConfig.ProvidersAPIExportEndpointSliceName = "providers.platform-mesh.io"
-	appConfig.ProvidersAPIExportEndpointSliceWorkspace = "root:platform-mesh-system"
-	appConfig.KCP = defaultKcpOperatorConfig
-
-	commonConfig := &pmconfig.CommonServiceConfig{
-		IsLocal: true,
-	}
-
-	ctx = context.WithValue(ctx, keys.ConfigCtxKey, appConfig)
-
-	runtimeClient, err := client.New(s.config, client.Options{})
-	s.NoError(err, "failed to create kube client for runtime cluster")
-
-	var kcpAdminCfg *rest.Config
-	s.Eventually(func() bool {
-		kcpAdminCfg, err = pmsubs.BuildKcpAdminConfig(runtimeClient, &appConfig.KCP, appConfig.KCP.Url)
-		return err == nil
-	}, 240*time.Second, 5*time.Second, "waiting for kcp REST config")
-
-	scopedKcpAdminCfg := rest.CopyConfig(kcpAdminCfg)
-	scopedKcpAdminCfg.Host += "/clusters/" + appConfig.ProvidersAPIExportEndpointSliceWorkspace
-
-	providersVW, err := apiexport.New(scopedKcpAdminCfg, appConfig.ProvidersAPIExportEndpointSliceName, apiexport.Options{
-		Scheme: s.scheme,
-	})
-	s.NoError(err, "failed to create APIExport mc provider")
-
-	mgr, err := mcmanager.New(s.config, providersVW, ctrl.Options{
-		Scheme:      s.scheme,
-		BaseContext: func() context.Context { return ctx },
-		Metrics: metricsserver.Options{
-			BindAddress: "0",
-		},
-	})
-	s.NoError(err, "failed to create manager for providers operator")
-	if err != nil {
-		s.logger.Error().Err(err).Msg("Failed to create manager")
-		return
-	}
-
-	rec, err := providerscontroller.NewProviderReconciler(mgr, &appConfig, commonConfig)
-	s.NoError(err, "failed to ProviderReconciler controller")
-	s.NoError(rec.SetupWithManager(mgr, commonConfig), "failed to setup ProviderReconciler with manager")
-
-	go func() {
-		err := mgr.Start(ctx)
 		s.Nil(err)
 	}()
 	s.logger.Info().Msg("PlatformMesh operator started")

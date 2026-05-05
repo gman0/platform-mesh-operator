@@ -91,8 +91,6 @@ func (r *KubeconfigCopySubroutine) Process(ctx context.Context, obj client.Objec
 		return subroutines.StopWithRequeue(kubeconfigCopyRequeueDuration, "waiting for Provider to set kubeconfigSecretRef"), nil
 	}
 
-	fmt.Printf("### provider.Status.KubeconfigSecretRef=%#v\n", provider.Status.KubeconfigSecretRef)
-
 	if provider.Status.KubeconfigSecretRef.Name == "" || provider.Status.KubeconfigSecretRef.Namespace == "" {
 		panic(fmt.Sprintf("provider.Status.KubeconfigSecretRef is not populated! =%#v", provider.Status.KubeconfigSecretRef))
 	}

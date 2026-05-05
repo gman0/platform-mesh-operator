@@ -4,20 +4,35 @@ import (
 	"context"
 	"time"
 
-	// appsv1 "k8s.io/api/apps/v1"
+	"github.com/creasty/defaults"
 	kcptenancyv1alpha "github.com/kcp-dev/kcp/sdk/apis/tenancy/v1alpha1"
+	"github.com/kcp-dev/multicluster-provider/apiexport"
+	pmconfig "github.com/platform-mesh/golang-commons/config"
+	"github.com/platform-mesh/golang-commons/context/keys"
+	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	kerrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/rest"
+	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	metricsserver "sigs.k8s.io/controller-runtime/pkg/metrics/server"
+	mcmanager "sigs.k8s.io/multicluster-runtime/pkg/manager"
 
 	providersv1alpha1 "github.com/platform-mesh/platform-mesh-operator/api/providers/v1alpha1"
+	"github.com/platform-mesh/platform-mesh-operator/internal/config"
+	providerscontroller "github.com/platform-mesh/platform-mesh-operator/internal/controller/providers"
 	pmsubs "github.com/platform-mesh/platform-mesh-operator/pkg/subroutines"
 )
 
-func (s *KindTestSuite) TestManagedProvider() {
+func (s *KindTestSuite) TestManagedProvider01Bootstrap() {
+	// Run the Providers operator
+	s.logger.Info().Msg("starting Providers operator...")
+	s.runProviderOperator(context.Background())
+}
+
+func (s *KindTestSuite) TestManagedProvider02Lifecycle() {
 	ctx := s.T().Context()
 
 	s.Run("Ensure life-cycling ManagedProvider works", func() {
@@ -29,6 +44,7 @@ func (s *KindTestSuite) TestManagedProvider() {
 		providerScopedKcpAdminClient, err := client.New(providerScopedKcpAdminCfg, client.Options{
 			Scheme: s.scheme,
 		})
+		s.NoError(err, "creating kcp admin client should succeed")
 
 		// This test life-cycles ManagedProvider twice, validating ManagedProvider.spec.cleanupOnDelete.
 		// In both cases, ManagedProvider is expected to create a Deployment in the runtime cluster,
@@ -105,22 +121,26 @@ func (s *KindTestSuite) TestManagedProvider() {
 			},
 		})
 		s.NoError(err, "deleting ManagedProvider should succeed")
-		s.logger.Info().Msgf("ManagedProvider deleted, checking ")
+		s.logger.Info().Msgf("ManagedProvider deleted, checking that :root:providers:my-managed-provider workspace is deleted")
 		s.Eventually(func() bool {
 			err = s.client.Get(ctx, types.NamespacedName{
 				Namespace: "e2e-managed-provider",
 				Name:      "my-managed-provider",
 			}, &providersv1alpha1.ManagedProvider{})
 			return kerrors.IsNotFound(err)
-		}, 240*time.Second, 5*time.Second, "waiting for ManagedProvider to be deleted, but has err=%q", err)
+		}, 240*time.Second, 5*time.Second, "waiting for ManagedProvider to be deleted, but has err=%v", err)
 		providersScopedAdminCfg := rest.CopyConfig(kcpAdminCfg)
 		providersScopedAdminCfg.Host += "/clusters/root:providers"
+		providersScopedAdminClient, err := client.New(providersScopedAdminCfg, client.Options{
+			Scheme: s.scheme,
+		})
+		s.NoError(err, "creating kcp admin client should succeed")
 		s.Eventually(func() bool {
-			err = s.client.Get(ctx, types.NamespacedName{
+			err = providersScopedAdminClient.Get(ctx, types.NamespacedName{
 				Name: "my-managed-provider",
 			}, &kcptenancyv1alpha.Workspace{})
 			return kerrors.IsNotFound(err)
-		}, 240*time.Second, 5*time.Second, "waiting for provider's workspace :root:providers:my-managed-provider to be deleted, but has err=%q", err)
+		}, 240*time.Second, 5*time.Second, "waiting for provider's workspace :root:providers:my-managed-provider to be deleted, but has err=%v", err)
 	})
 }
 
@@ -218,6 +238,7 @@ func waitForManagedProviderAndValidate(ctx context.Context, s *KindTestSuite, pr
 
 	// Check that ManagedProvider reaches Deployed phase and that the Deployment exists.
 
+	s.logger.Info().Msgf("Waiting until ManagedProvider reaches Phase=Deployed")
 	s.Eventually(func() bool {
 		err = s.client.Get(ctx, managedProviderName, &managedProvider)
 		if err != nil {
@@ -225,4 +246,71 @@ func waitForManagedProviderAndValidate(ctx context.Context, s *KindTestSuite, pr
 		}
 		return managedProvider.Status.Phase == "Deployed"
 	}, 240*time.Second, 5*time.Second, "waiting for ManagedProvider to reach Phase=Deployed, but has err=%q Phase=%q", err, managedProvider.Status.Phase)
+
+	s.logger.Info().Msgf("Waiting until Deployment my-managed-provider-controller-example-httpbin-operator appears")
+	s.Eventually(func() bool {
+		err = s.client.Get(ctx, types.NamespacedName{
+			Namespace: managedProviderName.Namespace,
+			Name:      "my-managed-provider-controller-example-httpbin-operator",
+		}, &appsv1.Deployment{})
+		return err == nil
+	}, 240*time.Second, 5*time.Second, "waiting for Deployment my-managed-provider-controller-example-httpbin-operator, but has err=%v", err)
+}
+
+func (s *KindTestSuite) runProviderOperator(ctx context.Context) {
+	appConfig := config.NewProvidersConfig()
+	if err := defaults.Set(&appConfig); err != nil {
+		s.logger.Error().Err(err).Msg("Failed to set default Provider operator config")
+		return
+	}
+
+	appConfig.ProvidersAPIExportEndpointSliceName = "providers.platform-mesh.io"
+	appConfig.ProvidersAPIExportEndpointSliceWorkspace = "root:platform-mesh-system"
+	appConfig.KCP = defaultKcpOperatorConfig
+
+	commonConfig := &pmconfig.CommonServiceConfig{
+		IsLocal: true,
+	}
+
+	ctx = context.WithValue(ctx, keys.ConfigCtxKey, appConfig)
+
+	runtimeClient, err := client.New(s.config, client.Options{})
+	s.NoError(err, "failed to create kube client for runtime cluster")
+
+	var kcpAdminCfg *rest.Config
+	s.Eventually(func() bool {
+		kcpAdminCfg, err = pmsubs.BuildKcpAdminConfig(runtimeClient, &appConfig.KCP, appConfig.KCP.Url)
+		return err == nil
+	}, 240*time.Second, 5*time.Second, "waiting for kcp REST config")
+
+	scopedKcpAdminCfg := rest.CopyConfig(kcpAdminCfg)
+	scopedKcpAdminCfg.Host += "/clusters/" + appConfig.ProvidersAPIExportEndpointSliceWorkspace
+
+	providersVW, err := apiexport.New(scopedKcpAdminCfg, appConfig.ProvidersAPIExportEndpointSliceName, apiexport.Options{
+		Scheme: s.scheme,
+	})
+	s.NoError(err, "failed to create APIExport mc provider")
+
+	mgr, err := mcmanager.New(s.config, providersVW, ctrl.Options{
+		Scheme:      s.scheme,
+		BaseContext: func() context.Context { return ctx },
+		Metrics: metricsserver.Options{
+			BindAddress: "0",
+		},
+	})
+	s.NoError(err, "failed to create manager for providers operator")
+	if err != nil {
+		s.logger.Error().Err(err).Msg("Failed to create manager")
+		return
+	}
+
+	rec, err := providerscontroller.NewProviderReconciler(mgr, &appConfig, commonConfig)
+	s.NoError(err, "failed to ProviderReconciler controller")
+	s.NoError(rec.SetupWithManager(mgr, commonConfig), "failed to setup ProviderReconciler with manager")
+
+	go func() {
+		err := mgr.Start(ctx)
+		s.Nil(err)
+	}()
+	s.logger.Info().Msg("PlatformMesh operator started")
 }

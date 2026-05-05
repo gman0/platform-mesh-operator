@@ -19,7 +19,6 @@ package cmd
 import (
 	"context"
 	"crypto/tls"
-	"fmt"
 	"net/http"
 	"os"
 
@@ -99,13 +98,6 @@ func RunController(_ *cobra.Command, _ []string) { // coverage-ignore
 			log.Fatal().Err(err).Msg("unable to get in-cluster config")
 		}
 	}
-
-	fmt.Println("### known types START")
-	knownTypes := scheme.AllKnownTypes()
-	for gvk := range knownTypes {
-		fmt.Printf("# %q\n", gvk)
-	}
-	fmt.Println("### known types END")
 
 	mgr, err := mcmanager.New(restCfg, nil, mcmanager.Options{
 		Scheme: scheme,
