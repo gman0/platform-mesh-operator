@@ -44,11 +44,11 @@ import (
 type ScopedKubeconfigTestSuite struct {
 	suite.Suite
 	testObj         *ScopedKubeconfigSubroutine
-	clMock          *mocks.Client  // VW cluster client
-	localClientMock *mocks.Client  // admin secret reader
+	clMock          *mocks.Client // VW cluster client
+	localClientMock *mocks.Client // admin secret reader
 	kcpHelperMock   *mocks.KcpHelper
-	kcpClientMock   *mocks.Client  // root:providers scoped client
-	wsClientMock    *mocks.Client  // provider workspace scoped client
+	kcpClientMock   *mocks.Client // root:providers scoped client
+	wsClientMock    *mocks.Client // provider workspace scoped client
 	log             *logger.Logger
 	providersCfg    config.ProvidersConfig
 }

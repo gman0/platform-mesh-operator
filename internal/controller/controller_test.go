@@ -377,16 +377,17 @@ func (s *NewPlatformMeshReconcilerTestSuite) Test_allSubroutinesDisabled_returns
 	mgr := newFakeManager(fakeClient, s.scheme)
 	cfg := &config.OperatorConfig{
 		Subroutines: config.SubroutinesConfig{
-			Deployment:     config.DeploymentSubroutineConfig{Enabled: false},
-			KcpSetup:       config.KcpSetupSubroutineConfig{Enabled: false},
-			ProviderSecret: config.ProviderSecretSubroutineConfig{Enabled: false},
-			FeatureToggles: config.FeatureTogglesSubroutineConfig{Enabled: false},
-			Wait:           config.WaitSubroutineConfig{Enabled: false},
+			Deployment:         config.DeploymentSubroutineConfig{Enabled: false},
+			KcpSetup:           config.KcpSetupSubroutineConfig{Enabled: false},
+			ProviderController: config.ProviderControllerSubroutineConfig{Enabled: false},
+			ProviderSecret:     config.ProviderSecretSubroutineConfig{Enabled: false},
+			FeatureToggles:     config.FeatureTogglesSubroutineConfig{Enabled: false},
+			Wait:               config.WaitSubroutineConfig{Enabled: false},
 		},
 	}
 	commonCfg := &pmconfig.CommonServiceConfig{}
 
-	r, err := NewPlatformMeshReconciler(mgr, cfg, commonCfg, "/tmp", fakeClient, subroutines.NewImageVersionStore())
+	r, err := NewPlatformMeshReconciler(mgr, cfg, commonCfg, "/tmp", fakeClient, subroutines.NewImageVersionStore(), nil)
 	s.Require().NoError(err)
 	s.NotNil(r)
 	s.NotNil(r.lifecycle)
@@ -403,7 +404,7 @@ func (s *NewPlatformMeshReconcilerTestSuite) Test_deploymentSubroutineEnabled_re
 	}
 	commonCfg := &pmconfig.CommonServiceConfig{}
 
-	r, err := NewPlatformMeshReconciler(mgr, cfg, commonCfg, "/tmp", fakeClient, subroutines.NewImageVersionStore())
+	r, err := NewPlatformMeshReconciler(mgr, cfg, commonCfg, "/tmp", fakeClient, subroutines.NewImageVersionStore(), nil)
 	s.Require().NoError(err)
 	s.NotNil(r)
 	s.NotNil(r.lifecycle)
@@ -419,7 +420,7 @@ func (s *NewPlatformMeshReconcilerTestSuite) Test_kcpSetupSubroutineEnabled_retu
 	}
 	commonCfg := &pmconfig.CommonServiceConfig{}
 
-	r, err := NewPlatformMeshReconciler(mgr, cfg, commonCfg, "/tmp", fakeClient, nil)
+	r, err := NewPlatformMeshReconciler(mgr, cfg, commonCfg, "/tmp", fakeClient, nil, nil)
 	s.Require().NoError(err)
 	s.NotNil(r)
 	s.NotNil(r.lifecycle)
@@ -435,7 +436,7 @@ func (s *NewPlatformMeshReconcilerTestSuite) Test_waitSubroutineEnabled_returnsV
 	}
 	commonCfg := &pmconfig.CommonServiceConfig{}
 
-	r, err := NewPlatformMeshReconciler(mgr, cfg, commonCfg, "/tmp", fakeClient, nil)
+	r, err := NewPlatformMeshReconciler(mgr, cfg, commonCfg, "/tmp", fakeClient, nil, nil)
 	s.Require().NoError(err)
 	s.NotNil(r)
 	s.NotNil(r.lifecycle)
@@ -451,7 +452,7 @@ func (s *NewPlatformMeshReconcilerTestSuite) Test_providerSecretSubroutineEnable
 	}
 	commonCfg := &pmconfig.CommonServiceConfig{}
 
-	r, err := NewPlatformMeshReconciler(mgr, cfg, commonCfg, "/tmp", fakeClient, nil)
+	r, err := NewPlatformMeshReconciler(mgr, cfg, commonCfg, "/tmp", fakeClient, nil, nil)
 	s.Require().NoError(err)
 	s.NotNil(r)
 	s.NotNil(r.lifecycle)
@@ -467,8 +468,30 @@ func (s *NewPlatformMeshReconcilerTestSuite) Test_featureTogglesSubroutineEnable
 	}
 	commonCfg := &pmconfig.CommonServiceConfig{}
 
-	r, err := NewPlatformMeshReconciler(mgr, cfg, commonCfg, "/tmp", fakeClient, nil)
+	r, err := NewPlatformMeshReconciler(mgr, cfg, commonCfg, "/tmp", fakeClient, nil, nil)
 	s.Require().NoError(err)
 	s.NotNil(r)
 	s.NotNil(r.lifecycle)
 }
+
+func (s *NewPlatformMeshReconcilerTestSuite) Test_providerControllerSubroutineEnabled_returnsValidReconciler() {
+	fakeClient := fake.NewClientBuilder().WithScheme(s.scheme).Build()
+	mgr := newFakeManager(fakeClient, s.scheme)
+	cfg := &config.OperatorConfig{
+		Subroutines: config.SubroutinesConfig{
+			ProviderController: config.ProviderControllerSubroutineConfig{Enabled: true},
+		},
+	}
+	commonCfg := &pmconfig.CommonServiceConfig{}
+
+	r, err := NewPlatformMeshReconciler(mgr, cfg, commonCfg, "/tmp", fakeClient, nil, &fakeMultiProviderRegistry{})
+	s.Require().NoError(err)
+	s.NotNil(r)
+	s.NotNil(r.lifecycle)
+}
+
+type fakeMultiProviderRegistry struct{}
+
+func (f *fakeMultiProviderRegistry) AddProvider(_ string, _ multicluster.Provider) error { return nil }
+func (f *fakeMultiProviderRegistry) RemoveProvider(_ string)                              {}
+func (f *fakeMultiProviderRegistry) GetProvider(_ string) (multicluster.Provider, bool)  { return nil, false }

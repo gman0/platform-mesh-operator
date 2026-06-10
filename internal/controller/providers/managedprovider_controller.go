@@ -54,6 +54,7 @@ type ManagedProviderReconciler struct {
 // +kubebuilder:rbac:groups=providers.platform-mesh.io,resources=managedproviders/finalizers,verbs=update
 
 func (r *ManagedProviderReconciler) Reconcile(ctx context.Context, req mcreconcile.Request) (ctrl.Result, error) {
+	fmt.Printf("\n### ManagedProviderReconciler.Reconcile ###\n")
 	return r.lifecycle.Reconcile(ctx, req)
 }
 

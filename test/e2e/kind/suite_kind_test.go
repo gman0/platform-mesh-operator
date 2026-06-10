@@ -629,7 +629,7 @@ func (s *KindTestSuite) runPlatformMeshOperator(ctx context.Context) {
 	}
 
 	imageVersionStore := subroutines.NewImageVersionStore()
-	pmReconciler, err := controller.NewPlatformMeshReconciler(mgr, &appConfig, commonConfig, "../../../", mgr.GetLocalManager().GetClient(), imageVersionStore)
+	pmReconciler, err := controller.NewPlatformMeshReconciler(mgr, &appConfig, commonConfig, "../../../", mgr.GetLocalManager().GetClient(), imageVersionStore, nil)
 	if err != nil {
 		s.logger.Error().Err(err).Msg("Failed to create PlatformMesh reconciler")
 		return

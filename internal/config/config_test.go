@@ -26,6 +26,7 @@ func TestNewOperatorConfig(t *testing.T) {
 	assert.Equal(t, "domain-certificate", cfg.Subroutines.KcpSetup.DomainCertificateCASecretName)
 	assert.Equal(t, "ca.crt", cfg.Subroutines.KcpSetup.DomainCertificateCASecretKey)
 
+	assert.True(t, cfg.Subroutines.ProviderController.Enabled)
 	assert.True(t, cfg.Subroutines.ProviderSecret.Enabled)
 	assert.False(t, cfg.Subroutines.FeatureToggles.Enabled)
 	assert.True(t, cfg.Subroutines.Wait.Enabled)
@@ -43,6 +44,7 @@ func TestOperatorConfigAddFlags(t *testing.T) {
 
 	err := fs.Parse([]string{
 		"--workspace-dir=/tmp/ws",
+		"--subroutines-provider-controller-enabled=false",
 		"--kcp-url=https://kcp.example.local",
 		"--kcp-namespace=custom-ns",
 		"--kcp-root-shard-name=custom-root",
@@ -81,6 +83,7 @@ func TestOperatorConfigAddFlags(t *testing.T) {
 	assert.Equal(t, "domain-ca", cfg.Subroutines.KcpSetup.DomainCertificateCASecretName)
 	assert.Equal(t, "ca.crt", cfg.Subroutines.KcpSetup.DomainCertificateCASecretKey)
 
+	assert.False(t, cfg.Subroutines.ProviderController.Enabled)
 	assert.False(t, cfg.Subroutines.ProviderSecret.Enabled)
 	assert.True(t, cfg.Subroutines.FeatureToggles.Enabled)
 	assert.False(t, cfg.Subroutines.Wait.Enabled)

@@ -52,6 +52,7 @@ type ProviderReconciler struct {
 }
 
 func (r *ProviderReconciler) Reconcile(ctx context.Context, req mcreconcile.Request) (ctrl.Result, error) {
+	fmt.Printf("\n### ProviderReconciler.Reconcile ###\n")
 	return r.lifecycle.Reconcile(ctx, req)
 }
 
@@ -71,7 +72,7 @@ func (r *ProviderReconciler) SetupWithManager(mgr mcmanager.Manager, cfg *pmconf
 		Complete(r)
 }
 
-func NewProviderReconciler(mgr mcmanager.Manager, operatorCfg *config.OperatorConfig, commonCfg *pmconfig.CommonServiceConfig, localClient client.Client) (*ProviderReconciler, error) {
+func NewProviderReconciler(mgr mcmanager.Manager, operatorCfg *config.OperatorConfig, commonCfg *pmconfig.CommonServiceConfig) (*ProviderReconciler, error) {
 	kcpUrl := operatorCfg.KCP.Url
 	if kcpUrl == "" {
 		kcpUrl = fmt.Sprintf("https://%s-front-proxy.%s:%s", operatorCfg.KCP.FrontProxyName, operatorCfg.KCP.Namespace, operatorCfg.KCP.FrontProxyPort)
@@ -83,6 +84,7 @@ func NewProviderReconciler(mgr mcmanager.Manager, operatorCfg *config.OperatorCo
 	}
 
 	kcpHelper := &pmsubroutines.Helper{}
+	localClient := mgr.GetLocalManager().GetClient()
 
 	var subs []subroutines.Subroutine
 
