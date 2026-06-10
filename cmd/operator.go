@@ -22,20 +22,27 @@ import (
 	"fmt"
 	"net/http"
 	"os"
+	"time"
 
+	"github.com/kcp-dev/multicluster-provider/apiexport"
 	pmcontext "github.com/platform-mesh/golang-commons/context"
 	"github.com/spf13/cobra"
 	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
+	corev1 "k8s.io/api/core/v1"
 	_ "k8s.io/client-go/plugin/pkg/client/auth"
 	"k8s.io/client-go/rest"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/cluster"
 	"sigs.k8s.io/controller-runtime/pkg/healthz"
 	metricsserver "sigs.k8s.io/controller-runtime/pkg/metrics/server"
 	mcmanager "sigs.k8s.io/multicluster-runtime/pkg/manager"
+	"sigs.k8s.io/multicluster-runtime/pkg/multicluster"
+	"sigs.k8s.io/multicluster-runtime/providers/multi"
 
 	"github.com/platform-mesh/golang-commons/traces"
 
+	"github.com/platform-mesh/platform-mesh-operator/internal/config"
 	"github.com/platform-mesh/platform-mesh-operator/internal/controller"
 	"github.com/platform-mesh/platform-mesh-operator/internal/controller/providers"
 	"github.com/platform-mesh/platform-mesh-operator/pkg/subroutines"
@@ -45,6 +52,15 @@ var operatorCmd = &cobra.Command{
 	Use:   "operator",
 	Short: "operator to setup platform-mesh",
 	Run:   RunController,
+}
+
+func buildKcpAdminConfigForWorkspace(cl client.Client, kcp config.KCPConfig, wsPath string) (*rest.Config, error) {
+	kcpUrl := kcp.Url
+	if kcpUrl == "" {
+		kcpUrl = fmt.Sprintf("https://%s-front-proxy.%s:%s", kcp.FrontProxyName, kcp.Namespace, kcp.FrontProxyPort)
+	}
+	kcpUrl += fmt.Sprintf("/clusters/%s", wsPath)
+	return subroutines.BuildKubeconfigFromConfig(cl, &kcp, kcpUrl)
 }
 
 func RunController(_ *cobra.Command, _ []string) { // coverage-ignore
@@ -112,7 +128,9 @@ func RunController(_ *cobra.Command, _ []string) { // coverage-ignore
 		}
 	}
 
-	mgr, err := mcmanager.New(restCfg, nil, mcmanager.Options{
+	multiProvider := multi.New(multi.Options{})
+
+	mgr, err := mcmanager.New(restCfg, multiProvider, mcmanager.Options{
 		Scheme: scheme,
 		Metrics: metricsserver.Options{
 			BindAddress:   defaultCfg.Metrics.BindAddress,
@@ -132,6 +150,8 @@ func RunController(_ *cobra.Command, _ []string) { // coverage-ignore
 	}
 
 	log.Info().Msg("Manager successfully created")
+
+	localClient := mgr.GetLocalManager().GetClient()
 
 	restCfgInfra := ctrl.GetConfigOrDie()
 	restCfgInfra.Wrap(func(rt http.RoundTripper) http.RoundTripper {
@@ -182,6 +202,25 @@ func RunController(_ *cobra.Command, _ []string) { // coverage-ignore
 		os.Exit(1)
 	}
 
+	providerReconciler, err := providers.NewProviderReconciler(mgr, &operatorCfg, defaultCfg, localClient)
+	if err != nil {
+		setupLog.Error(err, "unable to create ProviderReconciler")
+		os.Exit(1)
+	}
+	if err := providerReconciler.SetupWithManager(mgr, defaultCfg); err != nil {
+		setupLog.Error(err, "unable to create controller", "controller", "Provider")
+		os.Exit(1)
+	}
+
+	if err := mgr.Add(&kcpRunnable{
+		multiProvider: multiProvider,
+		localClient:   localClient,
+		cfg:           &operatorCfg,
+	}); err != nil {
+		setupLog.Error(err, "unable to add KCP provider runnable")
+		os.Exit(1)
+	}
+
 	if err := mgr.AddHealthzCheck("healthz", healthz.Ping); err != nil {
 		setupLog.Error(err, "unable to set up health check")
 		os.Exit(1)
@@ -195,5 +234,87 @@ func RunController(_ *cobra.Command, _ []string) { // coverage-ignore
 	if err := mgr.Start(ctrl.SetupSignalHandler()); err != nil {
 		log.Fatal().Err(err).Msg("problem running manager")
 	}
+}
 
+type kcpRunnable struct {
+	multiProvider *multi.Provider
+	localClient   client.Client
+	cfg           *config.OperatorConfig
+}
+
+func (r *kcpRunnable) Engage(_ context.Context, _ multicluster.ClusterName, _ cluster.Cluster) error {
+	return nil
+}
+
+func (r *kcpRunnable) Start(ctx context.Context) error {
+	secretKey := client.ObjectKey{
+		Namespace: r.cfg.KCP.Namespace,
+		Name:      r.cfg.KCP.ClusterAdminSecretName,
+	}
+	for {
+		if err := r.waitForSecret(ctx, secretKey); err != nil {
+			return err
+		}
+		endpointCfg, err := buildKcpAdminConfigForWorkspace(r.localClient, r.cfg.KCP, r.cfg.Providers.ProvidersAPIExportEndpointSliceWorkspace)
+		if err != nil {
+			setupLog.Error(err, "unable to build KCP admin config, retrying")
+			if err := kcpSleep(ctx, 10*time.Second); err != nil {
+				return err
+			}
+			continue
+		}
+		apiexportProvider, err := apiexport.New(endpointCfg, r.cfg.Providers.ProvidersAPIExportEndpointSliceName, apiexport.Options{
+			Scheme: scheme,
+		})
+		if err != nil {
+			setupLog.Error(err, "unable to create apiexport provider, retrying")
+			if err := kcpSleep(ctx, 10*time.Second); err != nil {
+				return err
+			}
+			continue
+		}
+		if err := r.multiProvider.AddProvider("kcp", apiexportProvider); err != nil {
+			setupLog.Error(err, "unable to add KCP provider, retrying")
+			if err := kcpSleep(ctx, 10*time.Second); err != nil {
+				return err
+			}
+			continue
+		}
+		if err := r.waitForProviderRemoval(ctx); err != nil {
+			return err
+		}
+	}
+}
+
+func (r *kcpRunnable) waitForSecret(ctx context.Context, key client.ObjectKey) error {
+	for {
+		secret := &corev1.Secret{}
+		if err := r.localClient.Get(ctx, key, secret); err == nil {
+			return nil
+		}
+		setupLog.Info("waiting for KCP admin secret", "secret", key)
+		if err := kcpSleep(ctx, 10*time.Second); err != nil {
+			return err
+		}
+	}
+}
+
+func (r *kcpRunnable) waitForProviderRemoval(ctx context.Context) error {
+	for {
+		if _, ok := r.multiProvider.GetProvider("kcp"); !ok {
+			return nil
+		}
+		if err := kcpSleep(ctx, 5*time.Second); err != nil {
+			return err
+		}
+	}
+}
+
+func kcpSleep(ctx context.Context, d time.Duration) error {
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-time.After(d):
+		return nil
+	}
 }

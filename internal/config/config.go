@@ -88,6 +88,7 @@ type OperatorConfig struct {
 	Subroutines   SubroutinesConfig
 	RemoteRuntime RemoteClusterConfig
 	RemoteInfra   RemoteClusterConfig
+	Providers     ProvidersConfig
 }
 
 func NewOperatorConfig() OperatorConfig {
@@ -100,6 +101,7 @@ func NewOperatorConfig() OperatorConfig {
 			FrontProxyPort:         "8443",
 			ClusterAdminSecretName: "kcp-cluster-admin-client-cert",
 		},
+		Providers: NewProvidersConfig(),
 		Subroutines: SubroutinesConfig{
 			Deployment: DeploymentSubroutineConfig{
 				Enabled:                          true,
@@ -167,6 +169,8 @@ func (c *OperatorConfig) AddFlags(fs *pflag.FlagSet) {
 	fs.StringVar(&c.RemoteRuntime.InfraSecretKey, "remote-runtime-infra-secret-key", c.RemoteRuntime.InfraSecretKey, "Secret key for remote runtime infra kubeconfig")
 
 	fs.StringVar(&c.RemoteInfra.Kubeconfig, "remote-infra-kubeconfig", c.RemoteInfra.Kubeconfig, "Kubeconfig for remote infra cluster")
+
+	c.Providers.AddFlags(fs)
 }
 
 type ProvidersOperatorSubroutinesConfig struct {
@@ -177,18 +181,10 @@ type ProvidersConfig struct {
 	ProvidersAPIExportEndpointSliceName      string
 	ProvidersAPIExportEndpointSliceWorkspace string
 	Subroutines                              ProvidersOperatorSubroutinesConfig
-	KCP                                      KCPConfig
 }
 
 func NewProvidersConfig() ProvidersConfig {
 	return ProvidersConfig{
-		KCP: KCPConfig{
-			Namespace:              "platform-mesh-system",
-			RootShardName:          "root",
-			FrontProxyName:         "frontproxy",
-			FrontProxyPort:         "8443",
-			ClusterAdminSecretName: "kcp-cluster-admin-client-cert",
-		},
 		ProvidersAPIExportEndpointSliceName:      "providers.platform-mesh.io",
 		ProvidersAPIExportEndpointSliceWorkspace: "root:platform-mesh-system",
 		Subroutines: ProvidersOperatorSubroutinesConfig{
@@ -203,13 +199,6 @@ func NewProvidersConfig() ProvidersConfig {
 func (c *ProvidersConfig) AddFlags(fs *pflag.FlagSet) {
 	fs.StringVar(&c.ProvidersAPIExportEndpointSliceName, "providers-apiexport-endpointslice-name", c.ProvidersAPIExportEndpointSliceName, "Set name of the Providers APIExport endpoint slice to use")
 	fs.StringVar(&c.ProvidersAPIExportEndpointSliceWorkspace, "providers-apiexport-endpointslice-workspace", c.ProvidersAPIExportEndpointSliceWorkspace, "Set workspace of the Providers APIExport endpoint slice to use")
-
-	fs.StringVar(&c.KCP.Url, "kcp-url", c.KCP.Url, "Set KCP URL")
-	fs.StringVar(&c.KCP.Namespace, "kcp-namespace", c.KCP.Namespace, "Set KCP namespace")
-	fs.StringVar(&c.KCP.RootShardName, "kcp-root-shard-name", c.KCP.RootShardName, "Set KCP root shard name")
-	fs.StringVar(&c.KCP.FrontProxyName, "kcp-front-proxy-name", c.KCP.FrontProxyName, "Set KCP front-proxy name")
-	fs.StringVar(&c.KCP.FrontProxyPort, "kcp-front-proxy-port", c.KCP.FrontProxyPort, "Set KCP front-proxy port")
-	fs.StringVar(&c.KCP.ClusterAdminSecretName, "kcp-cluster-admin-secret-name", c.KCP.ClusterAdminSecretName, "Set cluster-admin secret name")
 
 	fs.BoolVar(&c.Subroutines.Providers.Workspace.Enabled, "subroutines-providers-workspace-enabled", c.Subroutines.Providers.Workspace.Enabled, "Enable Provider workspace subroutine")
 	fs.BoolVar(&c.Subroutines.Providers.Kubeconfig.Enabled, "subroutines-providers-kubeconfig-enabled", c.Subroutines.Providers.Kubeconfig.Enabled, "Enable Provider scoped-kubeconfig subroutine")
