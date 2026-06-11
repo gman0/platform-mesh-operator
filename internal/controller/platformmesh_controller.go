@@ -128,7 +128,7 @@ func (r *PlatformMeshReconciler) mapConfigMapToPlatformMesh(ctx context.Context,
 	return requests
 }
 
-func NewPlatformMeshReconciler(mgr mcmanager.Manager, cfg *config.OperatorConfig, commonCfg *pmconfig.CommonServiceConfig, dir string, clientInfra client.Client, imageVersionStore *pmsubs.ImageVersionStore, multiRegistry pmsubs.MultiProviderRegistry) (*PlatformMeshReconciler, error) {
+func NewPlatformMeshReconciler(mgr mcmanager.Manager, cfg *config.OperatorConfig, commonCfg *pmconfig.CommonServiceConfig, dir string, clientInfra client.Client, imageVersionStore *pmsubs.ImageVersionStore) (*PlatformMeshReconciler, error) {
 	kcpUrl := fmt.Sprintf("https://%s-front-proxy.%s:%s", cfg.KCP.FrontProxyName, cfg.KCP.Namespace, cfg.KCP.FrontProxyPort)
 	if cfg.KCP.Url != "" {
 		kcpUrl = cfg.KCP.Url
@@ -144,13 +144,6 @@ func NewPlatformMeshReconciler(mgr mcmanager.Manager, cfg *config.OperatorConfig
 	}
 	if cfg.Subroutines.KcpSetup.Enabled {
 		subs = append(subs, pmsubs.NewKcpsetupSubroutine(localCl, &pmsubs.Helper{}, cfg, dir+"/manifests/kcp", kcpUrl))
-	}
-	fmt.Printf("\n\n\n### cfg.Subroutines.ProviderController.Enabled=%v ###\n\n\n", cfg.Subroutines.ProviderController.Enabled)
-	if cfg.Subroutines.ProviderController.Enabled {
-		fmt.Printf("\n\n\n### adding Subroutines.ProviderController ###\n\n\n")
-		subs = append(subs, pmsubs.NewProviderControllerSubroutine(
-			localCl, cfg, multiRegistry, mgr.GetLocalManager().GetScheme(),
-		))
 	}
 	if cfg.Subroutines.ProviderSecret.Enabled {
 		subs = append(subs, pmsubs.NewProviderSecretSubroutine(localCl, &pmsubs.Helper{}, pmsubs.DefaultHelmGetter{}, kcpUrl))

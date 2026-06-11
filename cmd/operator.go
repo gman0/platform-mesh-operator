@@ -22,24 +22,28 @@ import (
 	"fmt"
 	"net/http"
 	"os"
+	"time"
 
+	"github.com/kcp-dev/multicluster-provider/apiexport"
 	pmcontext "github.com/platform-mesh/golang-commons/context"
 	"github.com/spf13/cobra"
 	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
+	"k8s.io/apimachinery/pkg/util/wait"
 	_ "k8s.io/client-go/plugin/pkg/client/auth"
 	"k8s.io/client-go/rest"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/cluster"
 	"sigs.k8s.io/controller-runtime/pkg/healthz"
 	metricsserver "sigs.k8s.io/controller-runtime/pkg/metrics/server"
 	mcmanager "sigs.k8s.io/multicluster-runtime/pkg/manager"
-	"sigs.k8s.io/multicluster-runtime/providers/multi"
-	"sigs.k8s.io/multicluster-runtime/providers/single"
+	"sigs.k8s.io/multicluster-runtime/pkg/multicluster"
 
 	"github.com/platform-mesh/golang-commons/traces"
 
 	"github.com/platform-mesh/platform-mesh-operator/internal/controller"
 	"github.com/platform-mesh/platform-mesh-operator/internal/controller/providers"
+	mdelegate "github.com/platform-mesh/platform-mesh-operator/internal/manager/delegate"
 	"github.com/platform-mesh/platform-mesh-operator/pkg/subroutines"
 )
 
@@ -48,6 +52,8 @@ var operatorCmd = &cobra.Command{
 	Short: "operator to setup platform-mesh",
 	Run:   RunController,
 }
+
+const defaultWaitForKcpAdminKubeconfigPeriod = time.Second * 15
 
 func RunController(_ *cobra.Command, _ []string) { // coverage-ignore
 	var err error
@@ -114,9 +120,7 @@ func RunController(_ *cobra.Command, _ []string) { // coverage-ignore
 		}
 	}
 
-	multiProvider := multi.New(multi.Options{})
-
-	mgr, err := mcmanager.New(restCfg, multiProvider, mcmanager.Options{
+	mgrOpts := mcmanager.Options{
 		Scheme: scheme,
 		Metrics: metricsserver.Options{
 			BindAddress:   defaultCfg.Metrics.BindAddress,
@@ -129,19 +133,18 @@ func RunController(_ *cobra.Command, _ []string) { // coverage-ignore
 		LeaderElectionID:              "81924e50.platform-mesh.org",
 		LeaderElectionConfig:          leaderCfg,
 		LeaderElectionReleaseOnCancel: true,
-	})
+	}
+	mgr, err := mcmanager.New(restCfg, nil, mgrOpts)
 	if err != nil {
-		setupLog.Error(err, "unable to start manager")
+		setupLog.Error(err, "unable to primary start manager")
 		os.Exit(1)
 	}
 
-	log.Info().Msg("Manager successfully created")
+	log.Info().Msg("Primary manager successfully created")
 
-	// Register the local runtime cluster so mcbuilder-based controllers watch it.
-	// When GetProvider() != nil, mcbuilder defaults to watching only provider clusters;
-	// without this the PlatformMeshReconciler would never see PlatformMesh objects.
-	if err := multiProvider.AddProvider(mcmanager.LocalCluster.String(), single.New(mcmanager.LocalCluster, mgr.GetLocalManager())); err != nil {
-		setupLog.Error(err, "unable to register runtime cluster with multi provider")
+	delegate, err := mdelegate.New(mgr, mgrOpts)
+	if err != nil {
+		setupLog.Error(err, "unable to create manager delegate")
 		os.Exit(1)
 	}
 
@@ -164,7 +167,7 @@ func RunController(_ *cobra.Command, _ []string) { // coverage-ignore
 	}
 	imageVersionStore := subroutines.NewImageVersionStore()
 
-	pmReconciler, err := controller.NewPlatformMeshReconciler(mgr, &operatorCfg, defaultCfg, operatorCfg.WorkspaceDir, clientInfra, imageVersionStore, multiProvider)
+	pmReconciler, err := controller.NewPlatformMeshReconciler(mgr, &operatorCfg, defaultCfg, operatorCfg.WorkspaceDir, clientInfra, imageVersionStore)
 	if err != nil {
 		setupLog.Error(err, "unable to create PlatformMesh reconciler")
 		os.Exit(1)
@@ -194,16 +197,6 @@ func RunController(_ *cobra.Command, _ []string) { // coverage-ignore
 		os.Exit(1)
 	}
 
-	providerReconciler, err := providers.NewProviderReconciler(mgr, &operatorCfg, defaultCfg)
-	if err != nil {
-		setupLog.Error(err, "unable to create ProviderReconciler")
-		os.Exit(1)
-	}
-	if err := providerReconciler.SetupWithManager(mgr, defaultCfg); err != nil {
-		setupLog.Error(err, "unable to create controller", "controller", "Provider")
-		os.Exit(1)
-	}
-
 	if err := mgr.AddHealthzCheck("healthz", healthz.Ping); err != nil {
 		setupLog.Error(err, "unable to set up health check")
 		os.Exit(1)
@@ -213,8 +206,82 @@ func RunController(_ *cobra.Command, _ []string) { // coverage-ignore
 		os.Exit(1)
 	}
 
-	setupLog.Info("starting manager")
-	if err := mgr.Start(ctrl.SetupSignalHandler()); err != nil {
+	if err := mgr.Add(&providersAPIExportManagerRunnable{
+		runtimeCl: clientInfra,
+		delegate:  delegate,
+	}); err != nil {
+		setupLog.Error(err, "unable to add providers manager runnable")
+		os.Exit(1)
+	}
+
+	setupLog.Info("starting manager delegate")
+	if err := delegate.Start(ctrl.SetupSignalHandler()); err != nil {
 		log.Fatal().Err(err).Msg("problem running manager")
 	}
+}
+
+func buildKcpAdminConfigForWorkspace(cl client.Client, wsPath string) (*rest.Config, error) {
+	kcpUrl := operatorCfg.KCP.Url
+	if kcpUrl == "" {
+		kcpUrl = fmt.Sprintf("https://%s-front-proxy.%s:%s", operatorCfg.KCP.FrontProxyName, operatorCfg.KCP.Namespace, operatorCfg.KCP.FrontProxyPort)
+	}
+	kcpUrl += fmt.Sprintf("/clusters/%s", wsPath)
+	return subroutines.BuildKubeconfigFromConfig(cl, &operatorCfg.KCP, kcpUrl)
+}
+
+type providersAPIExportManagerRunnable struct {
+	runtimeCl  client.Client
+	reconciler *providers.ProviderReconciler
+	delegate   *mdelegate.DelegatedManager
+}
+
+func (r *providersAPIExportManagerRunnable) NeedLeaderElection() bool {
+	return defaultCfg.LeaderElectionEnabled
+}
+
+func (r *providersAPIExportManagerRunnable) Start(ctx context.Context) error {
+	// Wait until we have kcp up, with its kubeconfig available.
+	var err error
+	var kcpCfg *rest.Config
+	err = wait.PollUntilContextCancel(ctx, defaultWaitForKcpAdminKubeconfigPeriod, true, func(ctx context.Context) (bool, error) {
+		kcpCfg, err = buildKcpAdminConfigForWorkspace(r.runtimeCl, operatorCfg.Providers.ProvidersAPIExportEndpointSliceWorkspace)
+		return err == nil, err
+	})
+	if err != nil {
+		return err
+	}
+	kcpCfg.Wrap(func(rt http.RoundTripper) http.RoundTripper {
+		return otelhttp.NewTransport(rt)
+	})
+
+	// Set up the mgr with apiexport provider.
+	apiexportProvider, err := apiexport.New(kcpCfg, operatorCfg.Providers.ProvidersAPIExportEndpointSliceName, apiexport.Options{
+		Scheme: scheme,
+	})
+	if err != nil {
+		return err
+	}
+	mgr, err := r.delegate.AddSecondary("providers-apiexport", kcpCfg, apiexportProvider, mcmanager.Options{})
+	if err != nil {
+		return fmt.Errorf("failed to create providers-apiexport manager: %v", err)
+	}
+
+	providersReconciler, err := providers.NewProviderReconciler(mgr, r.runtimeCl, &operatorCfg, defaultCfg)
+	if err != nil {
+		return fmt.Errorf("failed to create Providers reconciler: %v", err)
+	}
+
+	// Setup the reconciler against the mgr.
+	providersReconciler.SetupWithManager(mgr, defaultCfg)
+	if err != nil {
+		setupLog.Error(err, "unable to setup ProviderReconciler with manager")
+		os.Exit(1)
+	}
+
+	// Go!
+	return mgr.Start(ctx)
+}
+
+func (r *providersAPIExportManagerRunnable) Engage(_ context.Context, _ multicluster.ClusterName, _ cluster.Cluster) error {
+	return nil // Don't care.
 }

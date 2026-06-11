@@ -72,7 +72,12 @@ func (r *ProviderReconciler) SetupWithManager(mgr mcmanager.Manager, cfg *pmconf
 		Complete(r)
 }
 
-func NewProviderReconciler(mgr mcmanager.Manager, operatorCfg *config.OperatorConfig, commonCfg *pmconfig.CommonServiceConfig) (*ProviderReconciler, error) {
+// NewProviderReconciler creates a ProviderReconciler that watches Provider objects via mgr
+// (a kcp-facing manager) and performs subroutine operations against KCP.
+// runtimeClient must be a client to the runtime cluster so subroutines can read the KCP
+// credentials secret that lives there; using mgr.GetLocalManager().GetClient() would return
+// a KCP client and break that secret lookup.
+func NewProviderReconciler(mgr mcmanager.Manager, runtimeClient client.Client, operatorCfg *config.OperatorConfig, commonCfg *pmconfig.CommonServiceConfig) (*ProviderReconciler, error) {
 	kcpUrl := operatorCfg.KCP.Url
 	if kcpUrl == "" {
 		kcpUrl = fmt.Sprintf("https://%s-front-proxy.%s:%s", operatorCfg.KCP.FrontProxyName, operatorCfg.KCP.Namespace, operatorCfg.KCP.FrontProxyPort)
@@ -84,7 +89,7 @@ func NewProviderReconciler(mgr mcmanager.Manager, operatorCfg *config.OperatorCo
 	}
 
 	kcpHelper := &pmsubroutines.Helper{}
-	localClient := mgr.GetLocalManager().GetClient()
+	localClient := runtimeClient
 
 	var subs []subroutines.Subroutine
 

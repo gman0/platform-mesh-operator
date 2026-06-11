@@ -76,13 +76,12 @@ type ProvidersSubroutinesConfig struct {
 }
 
 type SubroutinesConfig struct {
-	Deployment         DeploymentSubroutineConfig
-	KcpSetup           KcpSetupSubroutineConfig
-	ProviderController ProviderControllerSubroutineConfig
-	ProviderSecret     ProviderSecretSubroutineConfig
-	FeatureToggles     FeatureTogglesSubroutineConfig
-	Wait               WaitSubroutineConfig
-	ManagedProvider    ManagedProviderSubroutinesConfig
+	Deployment      DeploymentSubroutineConfig
+	KcpSetup        KcpSetupSubroutineConfig
+	ProviderSecret  ProviderSecretSubroutineConfig
+	FeatureToggles  FeatureTogglesSubroutineConfig
+	Wait            WaitSubroutineConfig
+	ManagedProvider ManagedProviderSubroutinesConfig
 }
 
 // OperatorConfig struct to hold the app config
@@ -118,9 +117,6 @@ func NewOperatorConfig() OperatorConfig {
 				Enabled:                       true,
 				DomainCertificateCASecretName: "domain-certificate",
 				DomainCertificateCASecretKey:  "ca.crt",
-			},
-			ProviderController: ProviderControllerSubroutineConfig{
-				Enabled: true,
 			},
 			ProviderSecret: ProviderSecretSubroutineConfig{
 				Enabled: true,
@@ -163,7 +159,6 @@ func (c *OperatorConfig) AddFlags(fs *pflag.FlagSet) {
 	fs.StringVar(&c.Subroutines.KcpSetup.DomainCertificateCASecretName, "domain-certificate-ca-secret-name", c.Subroutines.KcpSetup.DomainCertificateCASecretName, "Domain certificate secret name")
 	fs.StringVar(&c.Subroutines.KcpSetup.DomainCertificateCASecretKey, "domain-certificate-ca-secret-key", c.Subroutines.KcpSetup.DomainCertificateCASecretKey, "Domain certificate secret key")
 
-	fs.BoolVar(&c.Subroutines.ProviderController.Enabled, "subroutines-provider-controller-enabled", c.Subroutines.ProviderController.Enabled, "Enable provider controller subroutine")
 	fs.BoolVar(&c.Subroutines.ProviderSecret.Enabled, "subroutines-provider-secret-enabled", c.Subroutines.ProviderSecret.Enabled, "Enable provider secret subroutine")
 	fs.BoolVar(&c.Subroutines.FeatureToggles.Enabled, "subroutines-feature-toggles-enabled", c.Subroutines.FeatureToggles.Enabled, "Enable feature toggles subroutine")
 	fs.BoolVar(&c.Subroutines.Wait.Enabled, "subroutines-wait-enabled", c.Subroutines.Wait.Enabled, "Enable wait subroutine")
