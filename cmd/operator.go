@@ -33,11 +33,9 @@ import (
 	"k8s.io/client-go/rest"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
-	"sigs.k8s.io/controller-runtime/pkg/cluster"
 	"sigs.k8s.io/controller-runtime/pkg/healthz"
 	metricsserver "sigs.k8s.io/controller-runtime/pkg/metrics/server"
 	mcmanager "sigs.k8s.io/multicluster-runtime/pkg/manager"
-	"sigs.k8s.io/multicluster-runtime/pkg/multicluster"
 
 	"github.com/platform-mesh/golang-commons/traces"
 
@@ -206,13 +204,7 @@ func RunController(_ *cobra.Command, _ []string) { // coverage-ignore
 		os.Exit(1)
 	}
 
-	if err := mgr.Add(&providersAPIExportManagerRunnable{
-		runtimeCl: clientInfra,
-		delegate:  delegate,
-	}); err != nil {
-		setupLog.Error(err, "unable to add providers manager runnable")
-		os.Exit(1)
-	}
+	go startProvidersOperator(ctx, clientInfra, delegate)
 
 	setupLog.Info("starting manager delegate")
 	if err := delegate.Start(ctrl.SetupSignalHandler()); err != nil {
@@ -229,26 +221,17 @@ func buildKcpAdminConfigForWorkspace(cl client.Client, wsPath string) (*rest.Con
 	return subroutines.BuildKubeconfigFromConfig(cl, &operatorCfg.KCP, kcpUrl)
 }
 
-type providersAPIExportManagerRunnable struct {
-	runtimeCl  client.Client
-	reconciler *providers.ProviderReconciler
-	delegate   *mdelegate.DelegatedManager
-}
-
-func (r *providersAPIExportManagerRunnable) NeedLeaderElection() bool {
-	return defaultCfg.LeaderElectionEnabled
-}
-
-func (r *providersAPIExportManagerRunnable) Start(ctx context.Context) error {
+func startProvidersOperator(ctx context.Context, runtimeCl client.Client, delegate *mdelegate.DelegatedManager) {
 	// Wait until we have kcp up, with its kubeconfig available.
 	var err error
 	var kcpCfg *rest.Config
 	err = wait.PollUntilContextCancel(ctx, defaultWaitForKcpAdminKubeconfigPeriod, true, func(ctx context.Context) (bool, error) {
-		kcpCfg, err = buildKcpAdminConfigForWorkspace(r.runtimeCl, operatorCfg.Providers.ProvidersAPIExportEndpointSliceWorkspace)
-		return err == nil, err
+		kcpCfg, err = buildKcpAdminConfigForWorkspace(runtimeCl, operatorCfg.Providers.ProvidersAPIExportEndpointSliceWorkspace)
+		setupLog.Error(err, "trying to retrieve kcp admin kubeconfig")
+		return err == nil, nil
 	})
 	if err != nil {
-		return err
+		log.Fatal().Err(err).Msg("failed retrieve kcp admin config")
 	}
 	kcpCfg.Wrap(func(rt http.RoundTripper) http.RoundTripper {
 		return otelhttp.NewTransport(rt)
@@ -259,16 +242,16 @@ func (r *providersAPIExportManagerRunnable) Start(ctx context.Context) error {
 		Scheme: scheme,
 	})
 	if err != nil {
-		return err
+		log.Fatal().Err(err).Msg("failed to create providers-apiexport manager")
 	}
-	mgr, err := r.delegate.AddSecondary("providers-apiexport", kcpCfg, apiexportProvider, mcmanager.Options{})
+	mgr, err := delegate.AddSecondary("providers-apiexport", kcpCfg, apiexportProvider, mcmanager.Options{})
 	if err != nil {
-		return fmt.Errorf("failed to create providers-apiexport manager: %v", err)
+		log.Fatal().Err(err).Msg("failed to create providers-apiexport manager")
 	}
 
-	providersReconciler, err := providers.NewProviderReconciler(mgr, r.runtimeCl, &operatorCfg, defaultCfg)
+	providersReconciler, err := providers.NewProviderReconciler(mgr, runtimeCl, &operatorCfg, defaultCfg)
 	if err != nil {
-		return fmt.Errorf("failed to create Providers reconciler: %v", err)
+		log.Fatal().Err(err).Msg("failed to create Providers reconciler")
 	}
 
 	// Setup the reconciler against the mgr.
@@ -278,10 +261,6 @@ func (r *providersAPIExportManagerRunnable) Start(ctx context.Context) error {
 		os.Exit(1)
 	}
 
-	// Go!
-	return mgr.Start(ctx)
-}
-
-func (r *providersAPIExportManagerRunnable) Engage(_ context.Context, _ multicluster.ClusterName, _ cluster.Cluster) error {
-	return nil // Don't care.
+	// Just wait here until cancelled, so that the reconciler is not GC'd.
+	<-ctx.Done()
 }
