@@ -212,15 +212,6 @@ func RunController(_ *cobra.Command, _ []string) { // coverage-ignore
 	}
 }
 
-func buildKcpAdminConfigForWorkspace(cl client.Client, wsPath string) (*rest.Config, error) {
-	kcpUrl := operatorCfg.KCP.Url
-	if kcpUrl == "" {
-		kcpUrl = fmt.Sprintf("https://%s-front-proxy.%s:%s", operatorCfg.KCP.FrontProxyName, operatorCfg.KCP.Namespace, operatorCfg.KCP.FrontProxyPort)
-	}
-	kcpUrl += fmt.Sprintf("/clusters/%s", wsPath)
-	return subroutines.BuildKubeconfigFromConfig(cl, &operatorCfg.KCP, kcpUrl)
-}
-
 func startProvidersOperator(ctx context.Context, runtimeCl client.Client, delegate *mdelegate.DelegatedManager) {
 	// Wait until we have kcp up, with its kubeconfig available.
 	var err error
@@ -263,4 +254,13 @@ func startProvidersOperator(ctx context.Context, runtimeCl client.Client, delega
 
 	// Just wait here until cancelled, so that the reconciler is not GC'd.
 	<-ctx.Done()
+}
+
+func buildKcpAdminConfigForWorkspace(cl client.Client, wsPath string) (*rest.Config, error) {
+	kcpUrl := operatorCfg.KCP.Url
+	if kcpUrl == "" {
+		kcpUrl = fmt.Sprintf("https://%s-front-proxy.%s:%s", operatorCfg.KCP.FrontProxyName, operatorCfg.KCP.Namespace, operatorCfg.KCP.FrontProxyPort)
+	}
+	kcpUrl += fmt.Sprintf("/clusters/%s", wsPath)
+	return subroutines.BuildKubeconfigFromConfig(cl, &operatorCfg.KCP, kcpUrl)
 }

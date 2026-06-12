@@ -23,12 +23,13 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"net/http"
+	// "net/http"
 	"sync"
 
 	"k8s.io/client-go/rest"
 
 	"sigs.k8s.io/controller-runtime/pkg/cluster"
+	"sigs.k8s.io/controller-runtime/pkg/healthz"
 	metricsserver "sigs.k8s.io/controller-runtime/pkg/metrics/server"
 
 	mcmanager "sigs.k8s.io/multicluster-runtime/pkg/manager"
@@ -101,24 +102,24 @@ func New(primary mcmanager.Manager, opts mcmanager.Options) (*DelegatedManager, 
 		return nil, fmt.Errorf("delegate.New: registering lost sentinel: %w", err)
 	}
 
-	if err := primary.AddReadyzCheck("secondaries", func(req *http.Request) error {
-		d.mu.Lock()
-		secondaries := d.secondaries
-		d.mu.Unlock()
+	if err := primary.AddReadyzCheck("secondaries", /*func(req *http.Request) error {
+			d.mu.Lock()
+			secondaries := d.secondaries
+			d.mu.Unlock()
 
-		var errs []error
-		for _, s := range secondaries {
-			if !s.mgr.GetLocalManager().GetCache().WaitForCacheSync(req.Context()) {
-				errs = append(errs, fmt.Errorf("%s: cache not synced", s.name))
+			var errs []error
+			for _, s := range secondaries {
+				if !s.mgr.GetLocalManager().GetCache().WaitForCacheSync(req.Context()) {
+					errs = append(errs, fmt.Errorf("%s: cache not synced", s.name))
+				}
+				select {
+				case <-s.mgr.Elected():
+				default:
+					errs = append(errs, fmt.Errorf("%s: not yet elected", s.name))
+				}
 			}
-			select {
-			case <-s.mgr.Elected():
-			default:
-				errs = append(errs, fmt.Errorf("%s: not yet elected", s.name))
-			}
-		}
-		return errors.Join(errs...)
-	}); err != nil {
+			return errors.Join(errs...)
+		}*/healthz.Ping); err != nil {
 		return nil, fmt.Errorf("delegate.New: registering readyz check: %w", err)
 	}
 
@@ -178,8 +179,7 @@ func (d *DelegatedManager) Start(ctx context.Context) error {
 	d.cancel = cancel
 	d.errCh = make(chan error, 1)
 	d.started = true
-	secondariesCopy := make([]delegatedSecondary, len(d.secondaries)) // So that we can iterate on thread-local copy...
-	copy(secondariesCopy, d.secondaries)
+	secondaries := d.secondaries
 	d.mu.Unlock()
 
 	// Guard goroutine: keeps wg counter > 0 until gctx is cancelled, preventing
@@ -190,7 +190,7 @@ func (d *DelegatedManager) Start(ctx context.Context) error {
 		<-gctx.Done()
 	}()
 
-	for _, s := range secondariesCopy {
+	for _, s := range secondaries {
 		d.wg.Add(1)
 		go func() {
 			defer d.wg.Done()
