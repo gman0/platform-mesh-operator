@@ -37,6 +37,7 @@ import (
 
 	providersv1alpha1 "github.com/platform-mesh/platform-mesh-operator/api/providers/v1alpha1"
 	"github.com/platform-mesh/platform-mesh-operator/internal/config"
+	"github.com/platform-mesh/platform-mesh-operator/internal/metrics"
 	pmsubroutines "github.com/platform-mesh/platform-mesh-operator/pkg/subroutines"
 	pmsubs "github.com/platform-mesh/platform-mesh-operator/pkg/subroutines/providers"
 )
@@ -54,8 +55,13 @@ type ManagedProviderReconciler struct {
 // +kubebuilder:rbac:groups=providers.platform-mesh.io,resources=managedproviders/finalizers,verbs=update
 
 func (r *ManagedProviderReconciler) Reconcile(ctx context.Context, req mcreconcile.Request) (ctrl.Result, error) {
-	fmt.Printf("\n### ManagedProviderReconciler.Reconcile ###\n")
-	return r.lifecycle.Reconcile(ctx, req)
+	result, err := r.lifecycle.Reconcile(ctx, req)
+	labelResult := "success"
+	if err != nil {
+		labelResult = "error"
+	}
+	metrics.ReconcileTotal.WithLabelValues(ManagedProviderControllerName, labelResult).Inc()
+	return result, err
 }
 
 // SetupWithManager sets up the controller with the Manager.

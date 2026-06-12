@@ -59,7 +59,6 @@ type ResourceReconciler struct {
 }
 
 func (r *ResourceReconciler) Reconcile(ctx context.Context, req mcreconcile.Request) (ctrl.Result, error) {
-	fmt.Printf("\n### ResourceReconciler.Reconcile ###\n")
 	result, err := r.lifecycle.Reconcile(ctx, req)
 	labelResult := "success"
 	if err != nil {

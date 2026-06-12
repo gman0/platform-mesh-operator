@@ -62,7 +62,6 @@ type PlatformMeshReconciler struct {
 // +kubebuilder:rbac:groups="",resources=configmaps,verbs=get;list;watch
 
 func (r *PlatformMeshReconciler) Reconcile(ctx context.Context, req mcreconcile.Request) (ctrl.Result, error) {
-	fmt.Printf("\n### PlatformMeshReconciler.Reconcile ###\n")
 	result, err := r.lifecycle.Reconcile(ctx, req)
 	labelResult := "success"
 	if err != nil {

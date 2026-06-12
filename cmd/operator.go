@@ -218,7 +218,9 @@ func startProvidersOperator(ctx context.Context, runtimeCl client.Client, mgrs *
 	var kcpCfg *rest.Config
 	err = wait.PollUntilContextCancel(ctx, defaultWaitForKcpAdminKubeconfigPeriod, true, func(ctx context.Context) (bool, error) {
 		kcpCfg, err = buildKcpAdminConfigForWorkspace(runtimeCl, operatorCfg.Providers.ProvidersAPIExportEndpointSliceWorkspace)
-		setupLog.Error(err, "trying to retrieve kcp admin kubeconfig")
+		if err != nil {
+			setupLog.Error(err, "trying to retrieve kcp admin kubeconfig")
+		}
 		return err == nil, nil
 	})
 	if err != nil {
@@ -247,7 +249,7 @@ func startProvidersOperator(ctx context.Context, runtimeCl client.Client, mgrs *
 	if err != nil {
 		log.Fatal().Err(err).Msg("failed to create Providers reconciler")
 	}
-	providersReconciler.SetupWithManager(mgr, defaultCfg)
+	err = providersReconciler.SetupWithManager(mgr, defaultCfg)
 	if err != nil {
 		setupLog.Error(err, "unable to setup ProviderReconciler with manager")
 		os.Exit(1)

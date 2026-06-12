@@ -38,6 +38,7 @@ import (
 	mcreconcile "sigs.k8s.io/multicluster-runtime/pkg/reconcile"
 
 	providersv1alpha1 "github.com/platform-mesh/platform-mesh-operator/api/providers/v1alpha1"
+	"github.com/platform-mesh/platform-mesh-operator/internal/metrics"
 	pmsubs "github.com/platform-mesh/platform-mesh-operator/pkg/subroutines/providers"
 )
 
@@ -52,7 +53,13 @@ type ProviderReconciler struct {
 }
 
 func (r *ProviderReconciler) Reconcile(ctx context.Context, req mcreconcile.Request) (ctrl.Result, error) {
-	return r.lifecycle.Reconcile(ctx, req)
+	result, err := r.lifecycle.Reconcile(ctx, req)
+	labelResult := "success"
+	if err != nil {
+		labelResult = "error"
+	}
+	metrics.ReconcileTotal.WithLabelValues(ProviderControllerName, labelResult).Inc()
+	return result, err
 }
 
 // SetupWithManager sets up the Provider controller with the Manager.
