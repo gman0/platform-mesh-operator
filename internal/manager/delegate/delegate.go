@@ -23,10 +23,13 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"time"
+
 	// "net/http"
 	"sync"
 
 	"k8s.io/client-go/rest"
+	"k8s.io/utils/ptr"
 
 	"sigs.k8s.io/controller-runtime/pkg/cluster"
 	"sigs.k8s.io/controller-runtime/pkg/healthz"
@@ -61,19 +64,19 @@ type delegatedSecondary struct {
 	name string
 }
 
-// lostSentinel is a NeedLeaderElection runnable that closes its channel when
+// closeOnLeaderLost is a NeedLeaderElection runnable that closes its channel when
 // the primary's internalCtx is cancelled (always before leaderElectionCancel
 // fires). It implements mcmanager.Runnable so it can be registered directly
-// via primary.Add; Engage is a no-op because the sentinel is cluster-agnostic.
-type lostSentinel struct{ ch chan struct{} }
+// via primary.Add.
+type closeOnLeaderLost struct{ ch chan struct{} }
 
-func (s lostSentinel) NeedLeaderElection() bool { return true }
-func (s lostSentinel) Start(ctx context.Context) error {
+func (s closeOnLeaderLost) NeedLeaderElection() bool { return true } // Needed by NeedLeaderElection interface.
+func (s closeOnLeaderLost) Start(ctx context.Context) error {
 	<-ctx.Done()
 	close(s.ch)
 	return nil
 }
-func (s lostSentinel) Engage(_ context.Context, _ multicluster.ClusterName, _ cluster.Cluster) error {
+func (s closeOnLeaderLost) Engage(_ context.Context, _ multicluster.ClusterName, _ cluster.Cluster) error {
 	return nil
 }
 
@@ -98,30 +101,17 @@ func New(primary mcmanager.Manager, opts mcmanager.Options) (*DelegatedManager, 
 		lostCh:      make(chan struct{}),
 	}
 
-	if err := primary.Add(lostSentinel{ch: d.lostCh}); err != nil {
+	if err := primary.Add(closeOnLeaderLost{ch: d.lostCh}); err != nil {
 		return nil, fmt.Errorf("delegate.New: registering lost sentinel: %w", err)
 	}
 
-	if err := primary.AddReadyzCheck("secondaries", /*func(req *http.Request) error {
-			d.mu.Lock()
-			secondaries := d.secondaries
-			d.mu.Unlock()
-
-			var errs []error
-			for _, s := range secondaries {
-				if !s.mgr.GetLocalManager().GetCache().WaitForCacheSync(req.Context()) {
-					errs = append(errs, fmt.Errorf("%s: cache not synced", s.name))
-				}
-				select {
-				case <-s.mgr.Elected():
-				default:
-					errs = append(errs, fmt.Errorf("%s: not yet elected", s.name))
-				}
-			}
-			return errors.Join(errs...)
-		}*/healthz.Ping); err != nil {
-		return nil, fmt.Errorf("delegate.New: registering readyz check: %w", err)
+	if err := primary.AddReadyzCheck("secondaries", healthz.Ping); err != nil {
+		return nil, fmt.Errorf("failed to register readyz check on secondaries: %v", err)
 	}
+	if err := primary.AddHealthzCheck("secondaries", healthz.Ping); err != nil {
+		return nil, fmt.Errorf("failed to register healthz check on secondaries: %v", err)
+	}
+	// ^ Expand checks
 
 	return d, nil
 }
@@ -139,14 +129,12 @@ func (d *DelegatedManager) Primary() mcmanager.Manager { return d.primary }
 //	PprofBindAddress        → "0"  (pprof server disabled)
 //	GracefulShutdownTimeout → same as primary
 //	Scheme                  → primary.GetLocalManager().GetScheme() if opts.Scheme is nil
-//	WebhookServer           → same as primary if primaryOpts.WebhookServer != nil
+//	WebhookServer           → TODO?
 //
-// When primaryOpts.LeaderElection is true (the common case), also overrides:
+// When primaryOpts.LeaderElection is true, also overrides:
 //
 //	LeaderElection                      → true
 //	LeaderElectionResourceLockInterface → ElectedGateLock proxy
-//	LeaseDuration / RenewDeadline /
-//	  RetryPeriod / ReleaseOnCancel     → copied from primary opts
 //
 // When primaryOpts.LeaderElection is false, LeaderElection is forced to false on
 // the secondary as well (no LE loop, no proxy lock).
@@ -158,7 +146,7 @@ func (d *DelegatedManager) AddSecondary(name string, cfg *rest.Config, provider 
 
 	mgr, err := d.newManager(cfg, provider, opts)
 	if err != nil {
-		return nil, fmt.Errorf("AddSecondary %q: %w", name, err)
+		return nil, fmt.Errorf("failed to add secondary manager %q: %v", name, err)
 	}
 
 	if err := d.registerSecondary(mgr, name); err != nil {
@@ -240,18 +228,30 @@ func (d *DelegatedManager) applyDelegationOverrides(opts mcmanager.Options, name
 			opts.Scheme = d.primary.GetLocalManager().GetScheme()
 		}
 	}
-	if d.primaryOpts.WebhookServer != nil {
-		opts.WebhookServer = d.primaryOpts.WebhookServer
-	}
 	if d.primaryOpts.LeaderElection {
 		CopyLeaderElectionOptions(&opts, d.primaryOpts)
-		opts.LeaderElectionResourceLockInterface = ElectedGateLock(
-			name, d.primary.Elected(), d.lostCh,
+		leaseDurationSeconds := ptr.Deref(opts.LeaseDuration, time.Duration(time.Second*15))
+		opts.LeaderElectionResourceLockInterface = LockSecondaryWhenPrimaryElected(
+			name, int(leaseDurationSeconds.Seconds()), d.primary.Elected(), d.lostCh,
 		)
 	} else {
 		opts.LeaderElection = false
 	}
+	// TODO: implement handling for opts.WebhookServer once we decide how we want to deal with this in a multi-manager setup.
 	return opts
+}
+
+// CopyLeaderElectionOptions copies the leader-election timing fields from src to dst
+// that remain relevant when LeaderElectionResourceLockInterface is used: sets
+// LeaderElection=true, and copies LeaseDuration, RenewDeadline, RetryPeriod, and
+// LeaderElectionReleaseOnCancel. ID/Namespace/ResourceLock fields are intentionally
+// not copied — they are ignored by controller-runtime when a pre-built lock is provided.
+func CopyLeaderElectionOptions(dst *mcmanager.Options, src mcmanager.Options) {
+	dst.LeaderElection = src.LeaderElection
+	dst.LeaseDuration = src.LeaseDuration
+	dst.RenewDeadline = src.RenewDeadline
+	dst.RetryPeriod = src.RetryPeriod
+	dst.LeaderElectionReleaseOnCancel = src.LeaderElectionReleaseOnCancel
 }
 
 // registerSecondary appends mgr to the secondaries list and, if Start has already
@@ -261,6 +261,12 @@ func (d *DelegatedManager) registerSecondary(mgr mcmanager.Manager, name string)
 
 	d.mu.Lock()
 	defer d.mu.Unlock()
+
+	for i := range d.secondaries {
+		if d.secondaries[i].name == name {
+			return fmt.Errorf("secondary manager %q already registered", name)
+		}
+	}
 
 	// Post-Start path: check that the group is not already stopping before
 	// appending. If we returned an error after the append, the ghost entry would
@@ -293,4 +299,9 @@ func (d *DelegatedManager) registerSecondary(mgr mcmanager.Manager, name string)
 	}()
 
 	return nil
+}
+
+// SetNewManager replaces d's manager constructor. For testing only.
+func SetNewManager_test(d *DelegatedManager, f func(*rest.Config, multicluster.Provider, mcmanager.Options, ...mcmanager.Option) (mcmanager.Manager, error)) {
+	d.newManager = f
 }

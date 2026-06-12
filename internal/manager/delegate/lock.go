@@ -18,28 +18,27 @@ package delegate
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 
-	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/client-go/tools/leaderelection/resourcelock"
 )
 
-// ElectedGateLock returns a resourcelock.Interface whose acquire/renew behaviour is
-// driven entirely by the elected and lost channels rather than the Kubernetes API.
+// LockSecondaryWhenPrimaryElected returns a resourcelock.Interface whose acquire/renew behaviour is
+// driven by the elected and lost channels of the primary.
 // Pass as Options.LeaderElectionResourceLockInterface on secondary managers.
 //
 //   - elected: closed when primary wins election (e.g. primary.Elected())
 //   - lost:    closed when primary loses election; secondary's OnStoppedLeading fires
 //     within at most RenewDeadline after this channel is closed
-//
-// No Kubernetes API calls are ever made by the returned lock.
-func ElectedGateLock(identity string, elected, lost <-chan struct{}) resourcelock.Interface {
+func LockSecondaryWhenPrimaryElected(identity string, leaseDurationSeconds int, elected, lost <-chan struct{}) resourcelock.Interface {
 	return &electedGateLock{
 		identity: identity,
 		elected:  elected,
 		lost:     lost,
+
+		leaseDurationSeconds: leaseDurationSeconds,
 	}
 }
 
@@ -47,6 +46,8 @@ type electedGateLock struct {
 	identity string
 	elected  <-chan struct{}
 	lost     <-chan struct{}
+
+	leaseDurationSeconds int
 }
 
 // isElected reports true when elected is closed and lost is not yet closed.
@@ -64,22 +65,31 @@ func (l *electedGateLock) isElected() bool {
 	return false
 }
 
-var leaseGR = schema.GroupResource{Group: "coordination.k8s.io", Resource: "leases"}
-
 // Get returns a synthetic owned LeaderElectionRecord when primary is elected,
 // or a not-found error before election or after loss. Raw bytes are always nil
 // because the proxy lock has no external source of truth; the LE loop adapts.
 func (l *electedGateLock) Get(_ context.Context) (*resourcelock.LeaderElectionRecord, []byte, error) {
+	identity := l.identity
+
 	if !l.isElected() {
-		return nil, nil, apierrors.NewNotFound(leaseGR, l.identity)
+		// We are not the leader, so someone else is. It doesn't really matter who,
+		// as long as the identity is different from ours.
+		identity += "-winner"
 	}
 	now := metav1.Now()
-	return &resourcelock.LeaderElectionRecord{
-		HolderIdentity:       l.identity,
-		LeaseDurationSeconds: 1<<31 - 1,
-		AcquireTime:          now,
+
+	lre := &resourcelock.LeaderElectionRecord{
+		HolderIdentity:       identity,
+		LeaseDurationSeconds: l.leaseDurationSeconds,
 		RenewTime:            now,
-	}, nil, nil
+		AcquireTime:          now,
+	}
+	lreJsonBytes, err := json.Marshal(lre)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	return lre, lreJsonBytes, nil
 }
 
 // Create succeeds once elected fires (idempotent), letting the LE loop transition
@@ -94,7 +104,7 @@ func (l *electedGateLock) Create(_ context.Context, _ resourcelock.LeaderElectio
 
 // Update succeeds while elected, and fails once lost fires, causing the secondary's
 // renew loop to declare loss after RenewDeadline.
-func (l *electedGateLock) Update(_ context.Context, _ resourcelock.LeaderElectionRecord) error {
+func (l *electedGateLock) Update(_ context.Context, ler resourcelock.LeaderElectionRecord) error {
 	if l.isElected() {
 		return nil
 	}
@@ -109,5 +119,5 @@ func (l *electedGateLock) Identity() string { return l.identity }
 
 // Describe returns a human-readable description used in LE log output.
 func (l *electedGateLock) Describe() string {
-	return fmt.Sprintf("elected-gate/%s", l.identity)
+	return fmt.Sprintf("secondary/%s", l.identity)
 }
