@@ -1,5 +1,5 @@
 /*
-Copyright 2025 The Kubernetes Authors.
+Copyright 2026.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -33,7 +33,7 @@ import (
 //   - lost:    closed when primary loses election; secondary's OnStoppedLeading fires
 //     within at most RenewDeadline after this channel is closed
 func LockSecondaryWhenPrimaryElected(identity string, leaseDurationSeconds int, elected, lost <-chan struct{}) resourcelock.Interface {
-	return &electedGateLock{
+	return &secondaryLock{
 		identity: identity,
 		elected:  elected,
 		lost:     lost,
@@ -42,7 +42,7 @@ func LockSecondaryWhenPrimaryElected(identity string, leaseDurationSeconds int, 
 	}
 }
 
-type electedGateLock struct {
+type secondaryLock struct {
 	identity string
 	elected  <-chan struct{}
 	lost     <-chan struct{}
@@ -51,7 +51,7 @@ type electedGateLock struct {
 }
 
 // isElected reports true when elected is closed and lost is not yet closed.
-func (l *electedGateLock) isElected() bool {
+func (l *secondaryLock) isElected() bool {
 	select {
 	case <-l.lost:
 		return false
@@ -68,12 +68,13 @@ func (l *electedGateLock) isElected() bool {
 // Get returns a synthetic owned LeaderElectionRecord when primary is elected,
 // or a not-found error before election or after loss. Raw bytes are always nil
 // because the proxy lock has no external source of truth; the LE loop adapts.
-func (l *electedGateLock) Get(_ context.Context) (*resourcelock.LeaderElectionRecord, []byte, error) {
+func (l *secondaryLock) Get(_ context.Context) (*resourcelock.LeaderElectionRecord, []byte, error) {
 	identity := l.identity
 
 	if !l.isElected() {
-		// We are not the leader, so someone else is. It doesn't really matter who,
-		// as long as the identity is different from ours.
+		// The primary is not the leader, so we (secondary) can't be either.
+		// We don't know who it is, but we don't really care. Just pass in
+		// identity different from ours.
 		identity += "-winner"
 	}
 	now := metav1.Now()
@@ -95,7 +96,7 @@ func (l *electedGateLock) Get(_ context.Context) (*resourcelock.LeaderElectionRe
 // Create succeeds once elected fires (idempotent), letting the LE loop transition
 // to the leader state on the first attempt after election. Before election it
 // returns an error so the loop retries at RetryPeriod intervals.
-func (l *electedGateLock) Create(_ context.Context, _ resourcelock.LeaderElectionRecord) error {
+func (l *secondaryLock) Create(_ context.Context, _ resourcelock.LeaderElectionRecord) error {
 	if l.isElected() {
 		return nil
 	}
@@ -104,7 +105,7 @@ func (l *electedGateLock) Create(_ context.Context, _ resourcelock.LeaderElectio
 
 // Update succeeds while elected, and fails once lost fires, causing the secondary's
 // renew loop to declare loss after RenewDeadline.
-func (l *electedGateLock) Update(_ context.Context, ler resourcelock.LeaderElectionRecord) error {
+func (l *secondaryLock) Update(_ context.Context, ler resourcelock.LeaderElectionRecord) error {
 	if l.isElected() {
 		return nil
 	}
@@ -112,12 +113,12 @@ func (l *electedGateLock) Update(_ context.Context, ler resourcelock.LeaderElect
 }
 
 // RecordEvent is a no-op; events are owned by the primary's LE loop.
-func (l *electedGateLock) RecordEvent(string) {}
+func (l *secondaryLock) RecordEvent(string) {}
 
 // Identity returns the fixed identity string passed to ElectedGateLock.
-func (l *electedGateLock) Identity() string { return l.identity }
+func (l *secondaryLock) Identity() string { return l.identity }
 
 // Describe returns a human-readable description used in LE log output.
-func (l *electedGateLock) Describe() string {
-	return fmt.Sprintf("secondary/%s", l.identity)
+func (l *secondaryLock) Describe() string {
+	return fmt.Sprintf("/secondary/%s", l.identity)
 }

@@ -1,5 +1,5 @@
 /*
-Copyright 2025 The Kubernetes Authors.
+Copyright 2026.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -59,15 +59,15 @@ type fakeMcManager struct {
 	local   *fakeLocalCrManager
 	elected chan struct{}
 
-	mu               sync.Mutex
-	runnables        []mcmanager.Runnable
-	readyzChecks     map[string]healthz.Checker
-	addErr           error
+	mu                sync.Mutex
+	runnables         []mcmanager.Runnable
+	readyzChecks      map[string]healthz.Checker
+	addErr            error
 	addReadyzCheckErr error
 
 	startOnce sync.Once
 	startedCh chan struct{} // closed the first time Start is called
-	startErr  error        // if non-nil, Start returns it immediately
+	startErr  error         // if non-nil, Start returns it immediately
 }
 
 func newFakeMcManager() *fakeMcManager {
@@ -83,7 +83,7 @@ func newFakeMcManager() *fakeMcManager {
 }
 
 func (m *fakeMcManager) GetLocalManager() crmanager.Manager { return m.local }
-func (m *fakeMcManager) Elected() <-chan struct{}            { return m.elected }
+func (m *fakeMcManager) Elected() <-chan struct{}           { return m.elected }
 
 func (m *fakeMcManager) Add(r mcmanager.Runnable) error {
 	if m.addErr != nil {

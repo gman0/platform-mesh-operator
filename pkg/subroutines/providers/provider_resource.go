@@ -19,6 +19,7 @@ package providers
 import (
 	"context"
 	"fmt"
+	"time"
 
 	"github.com/platform-mesh/golang-commons/controller/lifecycle/ratelimiter"
 	gcerrors "github.com/platform-mesh/golang-commons/errors"
@@ -32,6 +33,7 @@ import (
 
 	providersv1alpha1 "github.com/platform-mesh/platform-mesh-operator/api/providers/v1alpha1"
 	"github.com/platform-mesh/platform-mesh-operator/internal/config"
+	"github.com/platform-mesh/platform-mesh-operator/internal/metrics"
 	pmsubs "github.com/platform-mesh/platform-mesh-operator/pkg/subroutines"
 )
 
@@ -71,7 +73,17 @@ func (r *ProviderResourceSubroutine) GetName() string {
 	return ProviderResourceSubroutineName
 }
 
-func (r *ProviderResourceSubroutine) Process(ctx context.Context, obj client.Object) (subroutines.Result, error) {
+func (r *ProviderResourceSubroutine) Process(ctx context.Context, obj client.Object) (res subroutines.Result, err error) {
+	start := time.Now()
+	defer func() {
+		labelResult := "success"
+		if err != nil {
+			labelResult = "error"
+		}
+		metrics.SubroutineTotal.WithLabelValues(r.GetName(), labelResult).Inc()
+		metrics.SubroutineDuration.WithLabelValues(r.GetName()).Observe(time.Since(start).Seconds())
+	}()
+
 	log := logger.LoadLoggerFromContext(ctx).ChildLogger("subroutine", r.GetName())
 	inst := obj.(*providersv1alpha1.ManagedProvider)
 

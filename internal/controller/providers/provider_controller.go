@@ -52,7 +52,6 @@ type ProviderReconciler struct {
 }
 
 func (r *ProviderReconciler) Reconcile(ctx context.Context, req mcreconcile.Request) (ctrl.Result, error) {
-	fmt.Printf("\n### ProviderReconciler.Reconcile ###\n")
 	return r.lifecycle.Reconcile(ctx, req)
 }
 

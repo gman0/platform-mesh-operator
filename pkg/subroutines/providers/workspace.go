@@ -19,6 +19,7 @@ package providers
 import (
 	"context"
 	"fmt"
+	"time"
 
 	kcptenancyv1alpha "github.com/kcp-dev/kcp/sdk/apis/tenancy/v1alpha1"
 	"github.com/platform-mesh/golang-commons/controller/lifecycle/ratelimiter"
@@ -34,6 +35,7 @@ import (
 
 	providersv1alpha1 "github.com/platform-mesh/platform-mesh-operator/api/providers/v1alpha1"
 	"github.com/platform-mesh/platform-mesh-operator/internal/config"
+	"github.com/platform-mesh/platform-mesh-operator/internal/metrics"
 	pmsubs "github.com/platform-mesh/platform-mesh-operator/pkg/subroutines"
 )
 
@@ -84,7 +86,17 @@ func (r *ProviderWorkspaceSubroutine) GetName() string {
 	return ProviderWorkspaceSubroutineName
 }
 
-func (r *ProviderWorkspaceSubroutine) Process(ctx context.Context, obj client.Object) (subroutines.Result, error) {
+func (r *ProviderWorkspaceSubroutine) Process(ctx context.Context, obj client.Object) (res subroutines.Result, err error) {
+	start := time.Now()
+	defer func() {
+		labelResult := "success"
+		if err != nil {
+			labelResult = "error"
+		}
+		metrics.SubroutineTotal.WithLabelValues(r.GetName(), labelResult).Inc()
+		metrics.SubroutineDuration.WithLabelValues(r.GetName()).Observe(time.Since(start).Seconds())
+	}()
+
 	log := logger.LoadLoggerFromContext(ctx).ChildLogger("subroutine", r.GetName())
 	inst := obj.(*providersv1alpha1.Provider)
 

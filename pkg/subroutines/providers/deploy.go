@@ -36,6 +36,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 
 	providersv1alpha1 "github.com/platform-mesh/platform-mesh-operator/api/providers/v1alpha1"
+	"github.com/platform-mesh/platform-mesh-operator/internal/metrics"
 )
 
 const (
@@ -85,7 +86,17 @@ func (r *DeploySubroutine) GetName() string {
 	return DeploySubroutineName
 }
 
-func (r *DeploySubroutine) Process(ctx context.Context, obj client.Object) (subroutines.Result, error) {
+func (r *DeploySubroutine) Process(ctx context.Context, obj client.Object) (res subroutines.Result, err error) {
+	start := time.Now()
+	defer func() {
+		labelResult := "success"
+		if err != nil {
+			labelResult = "error"
+		}
+		metrics.SubroutineTotal.WithLabelValues(r.GetName(), labelResult).Inc()
+		metrics.SubroutineDuration.WithLabelValues(r.GetName()).Observe(time.Since(start).Seconds())
+	}()
+
 	inst := obj.(*providersv1alpha1.ManagedProvider)
 
 	result, err := r.doRuntimeDeployments(ctx, inst)
