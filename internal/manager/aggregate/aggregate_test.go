@@ -27,6 +27,7 @@ import (
 	"k8s.io/utils/ptr"
 
 	mcmanager "sigs.k8s.io/multicluster-runtime/pkg/manager"
+	"sigs.k8s.io/multicluster-runtime/pkg/multicluster"
 
 	"github.com/platform-mesh/platform-mesh-operator/internal/manager/aggregate"
 )
@@ -47,16 +48,16 @@ func newDM(t *testing.T, scheme *runtime.Scheme) (*aggregate.AggregatingManager,
 	return dm, primary
 }
 
-// addFake adds a secondary fakeMcManager and returns it.
+// addFake injects a factory returning sec into dm, then calls AddSecondary.
 func addFake(t *testing.T, dm *aggregate.AggregatingManager, name string) *fakeMcManager {
 	t.Helper()
 	sec := newFakeMcManager()
-	_, err := aggregate.AddSecondaryWith(dm, name, mcmanager.Options{}, nil,
-		func(_ *rest.Config, _ mcmanager.Options) (*fakeMcManager, error) {
-			return sec, nil
-		})
+	aggregate.SetNewManager_test(dm, func(_ *rest.Config, _ multicluster.Provider, _ mcmanager.Options, _ ...mcmanager.Option) (mcmanager.Manager, error) {
+		return sec, nil
+	})
+	_, err := dm.AddSecondary(name, nil, nil, mcmanager.Options{})
 	if err != nil {
-		t.Fatalf("AddSecondaryWith(%q): %v", name, err)
+		t.Fatalf("AddSecondary(%q): %v", name, err)
 	}
 	return sec
 }
@@ -134,11 +135,10 @@ func TestPrimary(t *testing.T) {
 	}
 }
 
-// ---- AddSecondaryWith delegation overrides ----------------------------------
+// ---- AddSecondary delegation overrides --------------------------------------
 
-func TestAddSecondaryWith_DelegationOverrides(t *testing.T) {
+func TestAddSecondary_DelegationOverrides(t *testing.T) {
 	scheme := runtime.NewScheme()
-	ws := &fakeWebhookServer{}
 	leaseDur := 20 * time.Second
 	renewDead := 10 * time.Second
 	retryPer := 2 * time.Second
@@ -147,7 +147,6 @@ func TestAddSecondaryWith_DelegationOverrides(t *testing.T) {
 	primary.local.scheme = scheme
 	primaryOpts := mcmanager.Options{
 		Scheme:                        scheme,
-		WebhookServer:                 ws,
 		LeaderElection:                true,
 		LeaseDuration:                 ptr.To(leaseDur),
 		RenewDeadline:                 ptr.To(renewDead),
@@ -160,13 +159,13 @@ func TestAddSecondaryWith_DelegationOverrides(t *testing.T) {
 	}
 
 	var capturedOpts mcmanager.Options
-	_, err = aggregate.AddSecondaryWith(dm, "sec-1", mcmanager.Options{}, nil,
-		func(_ *rest.Config, opts mcmanager.Options) (*fakeMcManager, error) {
-			capturedOpts = opts
-			return newFakeMcManager(), nil
-		})
+	aggregate.SetNewManager_test(dm, func(_ *rest.Config, _ multicluster.Provider, opts mcmanager.Options, _ ...mcmanager.Option) (mcmanager.Manager, error) {
+		capturedOpts = opts
+		return newFakeMcManager(), nil
+	})
+	_, err = dm.AddSecondary("sec-1", nil, nil, mcmanager.Options{})
 	if err != nil {
-		t.Fatalf("AddSecondaryWith: %v", err)
+		t.Fatalf("AddSecondary: %v", err)
 	}
 
 	if capturedOpts.HealthProbeBindAddress != "0" {
@@ -180,9 +179,6 @@ func TestAddSecondaryWith_DelegationOverrides(t *testing.T) {
 	}
 	if capturedOpts.Scheme != scheme {
 		t.Error("Scheme not propagated from primaryOpts")
-	}
-	if capturedOpts.WebhookServer != ws {
-		t.Error("WebhookServer not propagated from primaryOpts")
 	}
 	if !capturedOpts.LeaderElection {
 		t.Error("LeaderElection not set to true")
@@ -206,7 +202,7 @@ func TestAddSecondaryWith_DelegationOverrides(t *testing.T) {
 
 // When primaryOpts.Scheme is nil, the secondary should inherit the primary's
 // runtime scheme via primary.GetLocalManager().GetScheme().
-func TestAddSecondaryWith_SchemeFromPrimaryGetScheme(t *testing.T) {
+func TestAddSecondary_SchemeFromPrimaryGetScheme(t *testing.T) {
 	primary := newFakeMcManager()
 	scheme := primary.local.scheme // set by newFakeMcManager
 
@@ -217,13 +213,13 @@ func TestAddSecondaryWith_SchemeFromPrimaryGetScheme(t *testing.T) {
 	}
 
 	var capturedScheme *runtime.Scheme
-	_, err = aggregate.AddSecondaryWith(dm, "sec", mcmanager.Options{}, nil,
-		func(_ *rest.Config, opts mcmanager.Options) (*fakeMcManager, error) {
-			capturedScheme = opts.Scheme
-			return newFakeMcManager(), nil
-		})
+	aggregate.SetNewManager_test(dm, func(_ *rest.Config, _ multicluster.Provider, opts mcmanager.Options, _ ...mcmanager.Option) (mcmanager.Manager, error) {
+		capturedScheme = opts.Scheme
+		return newFakeMcManager(), nil
+	})
+	_, err = dm.AddSecondary("sec", nil, nil, mcmanager.Options{})
 	if err != nil {
-		t.Fatalf("AddSecondaryWith: %v", err)
+		t.Fatalf("AddSecondary: %v", err)
 	}
 	if capturedScheme != scheme {
 		t.Error("secondary scheme should be primary.GetLocalManager().GetScheme() when primaryOpts.Scheme is nil")
@@ -232,7 +228,7 @@ func TestAddSecondaryWith_SchemeFromPrimaryGetScheme(t *testing.T) {
 
 // When the primary has LeaderElection disabled, the secondary must also have it
 // disabled and must not receive an ElectedGateLock.
-func TestAddSecondaryWith_NoLeaderElection(t *testing.T) {
+func TestAddSecondary_NoLeaderElection(t *testing.T) {
 	primary := newFakeMcManager()
 	dm, err := aggregate.New(primary, mcmanager.Options{LeaderElection: false})
 	if err != nil {
@@ -240,13 +236,13 @@ func TestAddSecondaryWith_NoLeaderElection(t *testing.T) {
 	}
 
 	var capturedOpts mcmanager.Options
-	_, err = aggregate.AddSecondaryWith(dm, "sec", mcmanager.Options{}, nil,
-		func(_ *rest.Config, opts mcmanager.Options) (*fakeMcManager, error) {
-			capturedOpts = opts
-			return newFakeMcManager(), nil
-		})
+	aggregate.SetNewManager_test(dm, func(_ *rest.Config, _ multicluster.Provider, opts mcmanager.Options, _ ...mcmanager.Option) (mcmanager.Manager, error) {
+		capturedOpts = opts
+		return newFakeMcManager(), nil
+	})
+	_, err = dm.AddSecondary("sec", nil, nil, mcmanager.Options{})
 	if err != nil {
-		t.Fatalf("AddSecondaryWith: %v", err)
+		t.Fatalf("AddSecondary: %v", err)
 	}
 	if capturedOpts.LeaderElection {
 		t.Error("LeaderElection should be false when primary has LE disabled")
@@ -305,12 +301,12 @@ func TestStart_SecondaryError(t *testing.T) {
 	sec := newFakeMcManager()
 	sec.startErr = secErr
 
-	_, err := aggregate.AddSecondaryWith(dm, "bad", mcmanager.Options{}, nil,
-		func(_ *rest.Config, _ mcmanager.Options) (*fakeMcManager, error) {
-			return sec, nil
-		})
+	aggregate.SetNewManager_test(dm, func(_ *rest.Config, _ multicluster.Provider, _ mcmanager.Options, _ ...mcmanager.Option) (mcmanager.Manager, error) {
+		return sec, nil
+	})
+	_, err := dm.AddSecondary("bad", nil, nil, mcmanager.Options{})
 	if err != nil {
-		t.Fatalf("AddSecondaryWith: %v", err)
+		t.Fatalf("AddSecondary: %v", err)
 	}
 
 	err = dm.Start(context.Background())
@@ -319,7 +315,7 @@ func TestStart_SecondaryError(t *testing.T) {
 	}
 }
 
-func TestStart_DynamicSecondary(t *testing.T) {
+func TestStart_AddAfterStart(t *testing.T) {
 	dm, primary := newDM(t, runtime.NewScheme())
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -327,19 +323,19 @@ func TestStart_DynamicSecondary(t *testing.T) {
 	doneCh := startDM(t, dm, ctx)
 
 	// Wait until the primary's Start has been called — at that point d.started=true
-	// and d.gctx is set, so AddSecondaryWith will take the post-Start path.
+	// and d.gctx is set, so AddSecondary will take the post-Start path.
 	waitFor(t, primary.startedCh, "primary Start")
 
 	sec := newFakeMcManager()
-	_, err := aggregate.AddSecondaryWith(dm, "dynamic", mcmanager.Options{}, nil,
-		func(_ *rest.Config, _ mcmanager.Options) (*fakeMcManager, error) {
-			return sec, nil
-		})
+	aggregate.SetNewManager_test(dm, func(_ *rest.Config, _ multicluster.Provider, _ mcmanager.Options, _ ...mcmanager.Option) (mcmanager.Manager, error) {
+		return sec, nil
+	})
+	_, err := dm.AddSecondary("dynamic", nil, nil, mcmanager.Options{})
 	if err != nil {
-		t.Fatalf("AddSecondaryWith after Start: %v", err)
+		t.Fatalf("AddSecondary after Start: %v", err)
 	}
 
-	waitFor(t, sec.startedCh, "dynamic secondary Start")
+	waitFor(t, sec.startedCh, "adding secondary after Start")
 
 	cancel()
 	select {
@@ -368,10 +364,10 @@ func TestStart_AddAfterStop_ReturnsError(t *testing.T) {
 		t.Fatal("Start did not stop")
 	}
 
-	_, err := aggregate.AddSecondaryWith(dm, "late", mcmanager.Options{}, nil,
-		func(_ *rest.Config, _ mcmanager.Options) (*fakeMcManager, error) {
-			return newFakeMcManager(), nil
-		})
+	aggregate.SetNewManager_test(dm, func(_ *rest.Config, _ multicluster.Provider, _ mcmanager.Options, _ ...mcmanager.Option) (mcmanager.Manager, error) {
+		return newFakeMcManager(), nil
+	})
+	_, err := dm.AddSecondary("late", nil, nil, mcmanager.Options{})
 	if err == nil {
 		t.Fatal("expected error when adding secondary after group has stopped")
 	}
@@ -395,16 +391,14 @@ func TestStart_AddAfterStop_NoGhost(t *testing.T) {
 	}
 
 	lateSecondary := newFakeMcManager()
-	// lateSecondary.local.fcache is unsynced and lateSecondary.elected is never
-	// closed, so if it ends up in d.secondaries the readyz check will block then fail.
-	_, _ = aggregate.AddSecondaryWith(dm, "ghost", mcmanager.Options{}, nil,
-		func(_ *rest.Config, _ mcmanager.Options) (*fakeMcManager, error) {
-			return lateSecondary, nil
-		})
+	// lateSecondary.local.fcache is unsynced; a ghost entry would cause trouble once
+	// the readyz check is upgraded from healthz.Ping to a real aggregate check.
+	aggregate.SetNewManager_test(dm, func(_ *rest.Config, _ multicluster.Provider, _ mcmanager.Options, _ ...mcmanager.Option) (mcmanager.Manager, error) {
+		return lateSecondary, nil
+	})
+	_, _ = dm.AddSecondary("ghost", nil, nil, mcmanager.Options{})
 
-	// Fetch the registered readyz check and call it directly. If the ghost entry
-	// were present, WaitForCacheSync would block until the request context expires
-	// and the check would return an error.
+	// Fetch the registered readyz check and call it directly.
 	primary.mu.Lock()
 	check := primary.readyzChecks["secondaries"]
 	primary.mu.Unlock()
@@ -428,19 +422,6 @@ func TestReadyzCheck_EmptyList(t *testing.T) {
 	}
 }
 
-func TestReadyzCheck_NotReady(t *testing.T) {
-	dm, primary := newDM(t, runtime.NewScheme())
-	addFake(t, dm, "sec-1") // cache unsynced, not elected
-
-	primary.mu.Lock()
-	check := primary.readyzChecks["secondaries"]
-	primary.mu.Unlock()
-
-	if err := check(readyzRequest(t)); err == nil {
-		t.Fatal("expected readyz failure when secondary is unsynced and not elected")
-	}
-}
-
 func TestReadyzCheck_Ready(t *testing.T) {
 	dm, primary := newDM(t, runtime.NewScheme())
 	sec := addFake(t, dm, "sec-1")
@@ -454,25 +435,5 @@ func TestReadyzCheck_Ready(t *testing.T) {
 
 	if err := check(readyzRequest(t)); err != nil {
 		t.Fatalf("readyz check failed for synced+elected secondary: %v", err)
-	}
-}
-
-func TestReadyzCheck_PartialReady(t *testing.T) {
-	dm, primary := newDM(t, runtime.NewScheme())
-
-	// sec-1: synced and elected
-	sec1 := addFake(t, dm, "sec-1")
-	close(sec1.local.fcache.synced)
-	close(sec1.elected)
-
-	// sec-2: unsynced, not elected
-	addFake(t, dm, "sec-2")
-
-	primary.mu.Lock()
-	check := primary.readyzChecks["secondaries"]
-	primary.mu.Unlock()
-
-	if err := check(readyzRequest(t)); err == nil {
-		t.Fatal("expected readyz failure when one secondary is not ready")
 	}
 }

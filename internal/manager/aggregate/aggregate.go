@@ -161,15 +161,15 @@ func (d *AggregatingManager) AddSecondary(name string, cfg *rest.Config, provide
 // same context automatically.
 // Start should be called at most once.
 func (d *AggregatingManager) Start(ctx context.Context) error {
-	managersCtx, managersCtxCancel := context.WithCancel(ctx)
+	gctx, gcancel := context.WithCancel(ctx)
 
 	d.mu.Lock()
 	if d.started {
 		d.mu.Unlock()
 		return fmt.Errorf("aggregating manager already started")
 	}
-	d.gctx = managersCtx
-	d.gcancel = managersCtxCancel
+	d.gctx = gctx
+	d.gcancel = gcancel
 	d.errCh = make(chan error, 1)
 	d.started = true
 	secondaries := d.secondaries
@@ -180,15 +180,15 @@ func (d *AggregatingManager) Start(ctx context.Context) error {
 	d.wg.Add(1)
 	go func() {
 		defer d.wg.Done()
-		<-managersCtx.Done()
+		<-gctx.Done()
 	}()
 
 	for _, s := range secondaries {
 		d.wg.Add(1)
 		go func() {
 			defer d.wg.Done()
-			if err := s.mgr.Start(managersCtx); err != nil && !errors.Is(err, context.Canceled) {
-				managersCtxCancel()
+			if err := s.mgr.Start(gctx); err != nil && !errors.Is(err, context.Canceled) {
+				gcancel()
 				select {
 				case d.errCh <- err:
 				default:
@@ -201,13 +201,13 @@ func (d *AggregatingManager) Start(ctx context.Context) error {
 	d.wg.Add(1)
 	go func() {
 		defer d.wg.Done()
-		if err := d.primary.Start(managersCtx); err != nil {
+		if err := d.primary.Start(gctx); err != nil {
 			select {
 			case d.errCh <- err:
 			default:
 			}
 		}
-		managersCtxCancel()
+		gcancel()
 	}()
 
 	d.wg.Wait()

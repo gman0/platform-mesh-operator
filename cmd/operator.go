@@ -118,7 +118,7 @@ func RunController(_ *cobra.Command, _ []string) { // coverage-ignore
 		}
 	}
 
-	mgrOpts := mcmanager.Options{
+	platformMeshMgrOpts := mcmanager.Options{
 		Scheme: scheme,
 		Metrics: metricsserver.Options{
 			BindAddress:   defaultCfg.Metrics.BindAddress,
@@ -132,17 +132,17 @@ func RunController(_ *cobra.Command, _ []string) { // coverage-ignore
 		LeaderElectionConfig:          leaderCfg,
 		LeaderElectionReleaseOnCancel: true,
 	}
-	mgr, err := mcmanager.New(restCfg, nil, mgrOpts)
+	platformMeshMgr, err := mcmanager.New(restCfg, nil, platformMeshMgrOpts)
 	if err != nil {
 		setupLog.Error(err, "unable to primary start manager")
 		os.Exit(1)
 	}
 
-	log.Info().Msg("Primary manager successfully created")
+	log.Info().Msg("Platform-mesh manager successfully created")
 
-	delegate, err := aggregate.New(mgr, mgrOpts)
+	mgrs, err := aggregate.New(platformMeshMgr, platformMeshMgrOpts)
 	if err != nil {
-		setupLog.Error(err, "unable to create manager delegate")
+		setupLog.Error(err, "unable to create aggregating manager")
 		os.Exit(1)
 	}
 
@@ -165,54 +165,54 @@ func RunController(_ *cobra.Command, _ []string) { // coverage-ignore
 	}
 	imageVersionStore := subroutines.NewImageVersionStore()
 
-	pmReconciler, err := controller.NewPlatformMeshReconciler(mgr, &operatorCfg, defaultCfg, operatorCfg.WorkspaceDir, clientInfra, imageVersionStore)
+	pmReconciler, err := controller.NewPlatformMeshReconciler(platformMeshMgr, &operatorCfg, defaultCfg, operatorCfg.WorkspaceDir, clientInfra, imageVersionStore)
 	if err != nil {
 		setupLog.Error(err, "unable to create PlatformMesh reconciler")
 		os.Exit(1)
 	}
-	if err := pmReconciler.SetupWithManager(mgr, defaultCfg); err != nil {
+	if err := pmReconciler.SetupWithManager(platformMeshMgr, defaultCfg); err != nil {
 		setupLog.Error(err, "unable to create controller", "controller", "PlatformMesh")
 		os.Exit(1)
 	}
 
-	resourceReconciler, err := controller.NewResourceReconciler(mgr, &operatorCfg, clientInfra, imageVersionStore)
+	resourceReconciler, err := controller.NewResourceReconciler(platformMeshMgr, &operatorCfg, clientInfra, imageVersionStore)
 	if err != nil {
 		setupLog.Error(err, "unable to create Resource reconciler")
 		os.Exit(1)
 	}
-	if err := resourceReconciler.SetupWithManager(mgr, defaultCfg); err != nil {
+	if err := resourceReconciler.SetupWithManager(platformMeshMgr, defaultCfg); err != nil {
 		setupLog.Error(err, "unable to create controller", "controller", "Resource")
 		os.Exit(1)
 	}
 
-	managedProvidersReconciler, err := providers.NewManagedProviderReconciler(mgr, &operatorCfg, defaultCfg)
+	managedProvidersReconciler, err := providers.NewManagedProviderReconciler(platformMeshMgr, &operatorCfg, defaultCfg)
 	if err != nil {
 		setupLog.Error(err, "unable to create ManagedProvider reconciler")
 		os.Exit(1)
 	}
-	if err := managedProvidersReconciler.SetupWithManager(mgr, defaultCfg); err != nil {
+	if err := managedProvidersReconciler.SetupWithManager(platformMeshMgr, defaultCfg); err != nil {
 		setupLog.Error(err, "unable to create controller", "controller", "ManagedProvider")
 		os.Exit(1)
 	}
 
-	if err := mgr.AddHealthzCheck("healthz", healthz.Ping); err != nil {
+	if err := platformMeshMgr.AddHealthzCheck("healthz", healthz.Ping); err != nil {
 		setupLog.Error(err, "unable to set up health check")
 		os.Exit(1)
 	}
-	if err := mgr.AddReadyzCheck("readyz", healthz.Ping); err != nil {
+	if err := platformMeshMgr.AddReadyzCheck("readyz", healthz.Ping); err != nil {
 		setupLog.Error(err, "unable to set up ready check")
 		os.Exit(1)
 	}
 
-	go startProvidersOperator(ctx, clientInfra, delegate)
+	go startProvidersOperator(ctx, clientInfra, mgrs)
 
 	setupLog.Info("starting manager delegate")
-	if err := delegate.Start(ctrl.SetupSignalHandler()); err != nil {
+	if err := mgrs.Start(ctrl.SetupSignalHandler()); err != nil {
 		log.Fatal().Err(err).Msg("problem running manager")
 	}
 }
 
-func startProvidersOperator(ctx context.Context, runtimeCl client.Client, delegate *aggregate.AggregatingManager) {
+func startProvidersOperator(ctx context.Context, runtimeCl client.Client, mgrs *aggregate.AggregatingManager) {
 	// Wait until we have kcp up, with its kubeconfig available.
 	var err error
 	var kcpCfg *rest.Config
@@ -235,17 +235,18 @@ func startProvidersOperator(ctx context.Context, runtimeCl client.Client, delega
 	if err != nil {
 		log.Fatal().Err(err).Msg("failed to create providers-apiexport manager")
 	}
-	mgr, err := delegate.AddSecondary("providers-apiexport", kcpCfg, apiexportProvider, mcmanager.Options{})
+	mgr, err := mgrs.AddSecondary("providers-apiexport", kcpCfg, apiexportProvider, mcmanager.Options{})
 	if err != nil {
 		log.Fatal().Err(err).Msg("failed to create providers-apiexport manager")
 	}
 
+	log.Info().Msg("Providers manager successfully created")
+
+	// Setup the reconciler against the mgr.
 	providersReconciler, err := providers.NewProviderReconciler(mgr, runtimeCl, &operatorCfg, defaultCfg)
 	if err != nil {
 		log.Fatal().Err(err).Msg("failed to create Providers reconciler")
 	}
-
-	// Setup the reconciler against the mgr.
 	providersReconciler.SetupWithManager(mgr, defaultCfg)
 	if err != nil {
 		setupLog.Error(err, "unable to setup ProviderReconciler with manager")
