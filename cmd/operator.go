@@ -41,7 +41,7 @@ import (
 
 	"github.com/platform-mesh/platform-mesh-operator/internal/controller"
 	"github.com/platform-mesh/platform-mesh-operator/internal/controller/providers"
-	mdelegate "github.com/platform-mesh/platform-mesh-operator/internal/manager/delegate"
+	"github.com/platform-mesh/platform-mesh-operator/internal/manager/aggregate"
 	"github.com/platform-mesh/platform-mesh-operator/pkg/subroutines"
 )
 
@@ -140,7 +140,7 @@ func RunController(_ *cobra.Command, _ []string) { // coverage-ignore
 
 	log.Info().Msg("Primary manager successfully created")
 
-	delegate, err := mdelegate.New(mgr, mgrOpts)
+	delegate, err := aggregate.New(mgr, mgrOpts)
 	if err != nil {
 		setupLog.Error(err, "unable to create manager delegate")
 		os.Exit(1)
@@ -212,7 +212,7 @@ func RunController(_ *cobra.Command, _ []string) { // coverage-ignore
 	}
 }
 
-func startProvidersOperator(ctx context.Context, runtimeCl client.Client, delegate *mdelegate.DelegatedManager) {
+func startProvidersOperator(ctx context.Context, runtimeCl client.Client, delegate *aggregate.AggregatingManager) {
 	// Wait until we have kcp up, with its kubeconfig available.
 	var err error
 	var kcpCfg *rest.Config

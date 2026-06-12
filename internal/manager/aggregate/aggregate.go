@@ -14,10 +14,10 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-// Package delegate provides DelegatedManager, which wires multiple in-process
+// Package aggregate provides AggregatingManager, which wires multiple in-process
 // managers together so they share health probes, metrics, webhook server, and
 // leader election as a single operational unit.
-package delegate
+package aggregate
 
 import (
 	"context"
@@ -38,27 +38,27 @@ import (
 	"sigs.k8s.io/multicluster-runtime/pkg/multicluster"
 )
 
-// DelegatedManager owns a primary multicluster-runtime manager and zero or more
-// secondary managers that delegate all shared infrastructure to the primary.
+// AggregatingManager owns a primary multicluster-runtime manager and zero or more
+// secondary managers that aggregate all shared infrastructure into the primary.
 // Secondaries may be added before or after Start.
-type DelegatedManager struct {
+type AggregatingManager struct {
 	primary     mcmanager.Manager
 	primaryOpts mcmanager.Options
 	newManager  func(*rest.Config, multicluster.Provider, mcmanager.Options, ...mcmanager.Option) (mcmanager.Manager, error)
 
 	mu          sync.Mutex
-	secondaries []delegatedSecondary
+	secondaries []aggregatedSecondary
 	lostCh      chan struct{} // closed when primary's LE machinery stops
 
 	// populated by Start; guarded by mu for AddSecondary post-Start
 	started bool
 	gctx    context.Context
-	cancel  context.CancelFunc
+	gcancel context.CancelFunc
 	wg      sync.WaitGroup
 	errCh   chan error // capacity 1; first fatal error wins
 }
 
-type delegatedSecondary struct {
+type aggregatedSecondary struct {
 	mgr  mcmanager.Manager
 	name string
 }
@@ -79,7 +79,7 @@ func (s closeOnLeaderLost) Engage(_ context.Context, _ multicluster.ClusterName,
 	return nil
 }
 
-// New wraps primary and its construction Options in a DelegatedManager.
+// New wraps primary and its construction Options in a AggregatingManager.
 // opts must be the same Options value that was passed to the primary's constructor;
 // it provides the webhook server, scheme, timing, and graceful-shutdown values
 // that AddSecondary copies to each secondary.
@@ -92,8 +92,8 @@ func (s closeOnLeaderLost) Engage(_ context.Context, _ multicluster.ClusterName,
 //     unavailable after primary.Start() (internal.go:210).
 //
 // New must be called before primary.Start().
-func New(primary mcmanager.Manager, opts mcmanager.Options) (*DelegatedManager, error) {
-	d := &DelegatedManager{
+func New(primary mcmanager.Manager, opts mcmanager.Options) (*AggregatingManager, error) {
+	d := &AggregatingManager{
 		primary:     primary,
 		primaryOpts: opts,
 		newManager:  mcmanager.New,
@@ -101,7 +101,7 @@ func New(primary mcmanager.Manager, opts mcmanager.Options) (*DelegatedManager, 
 	}
 
 	if err := primary.Add(closeOnLeaderLost{ch: d.lostCh}); err != nil {
-		return nil, fmt.Errorf("delegate.New: registering lost sentinel: %w", err)
+		return nil, fmt.Errorf("aggregate.New: registering lost sentinel: %w", err)
 	}
 
 	if err := primary.AddReadyzCheck("secondaries", healthz.Ping); err != nil {
@@ -115,7 +115,7 @@ func New(primary mcmanager.Manager, opts mcmanager.Options) (*DelegatedManager, 
 }
 
 // Primary returns the primary manager.
-func (d *DelegatedManager) Primary() mcmanager.Manager { return d.primary }
+func (d *AggregatingManager) Primary() mcmanager.Manager { return d.primary }
 
 // AddSecondary creates a new manager for cfg with all delegation overrides applied
 // and registers it. May be called before or after Start. When Called after Start,
@@ -142,7 +142,7 @@ func (d *DelegatedManager) Primary() mcmanager.Manager { return d.primary }
 //
 // name must be unique across all secondaries; it is used as the LE lock identity
 // and appears in readyz error messages.
-func (d *DelegatedManager) AddSecondary(name string, cfg *rest.Config, provider multicluster.Provider, opts mcmanager.Options) (mcmanager.Manager, error) {
+func (d *AggregatingManager) AddSecondary(name string, cfg *rest.Config, provider multicluster.Provider, opts mcmanager.Options) (mcmanager.Manager, error) {
 	opts = d.applyDelegationOverrides(opts, name)
 
 	mgr, err := d.newManager(cfg, provider, opts)
@@ -160,16 +160,16 @@ func (d *DelegatedManager) AddSecondary(name string, cfg *rest.Config, provider 
 // Secondaries added via AddSecondary after Start is called are launched into the
 // same context automatically.
 // Start should be called at most once.
-func (d *DelegatedManager) Start(ctx context.Context) error {
-	gctx, cancel := context.WithCancel(ctx)
+func (d *AggregatingManager) Start(ctx context.Context) error {
+	managersCtx, managersCtxCancel := context.WithCancel(ctx)
 
 	d.mu.Lock()
 	if d.started {
 		d.mu.Unlock()
 		return fmt.Errorf("aggregating manager already started")
 	}
-	d.gctx = gctx
-	d.cancel = cancel
+	d.gctx = managersCtx
+	d.gcancel = managersCtxCancel
 	d.errCh = make(chan error, 1)
 	d.started = true
 	secondaries := d.secondaries
@@ -180,15 +180,15 @@ func (d *DelegatedManager) Start(ctx context.Context) error {
 	d.wg.Add(1)
 	go func() {
 		defer d.wg.Done()
-		<-gctx.Done()
+		<-managersCtx.Done()
 	}()
 
 	for _, s := range secondaries {
 		d.wg.Add(1)
 		go func() {
 			defer d.wg.Done()
-			if err := s.mgr.Start(gctx); err != nil && !errors.Is(err, context.Canceled) {
-				cancel()
+			if err := s.mgr.Start(managersCtx); err != nil && !errors.Is(err, context.Canceled) {
+				managersCtxCancel()
 				select {
 				case d.errCh <- err:
 				default:
@@ -201,13 +201,13 @@ func (d *DelegatedManager) Start(ctx context.Context) error {
 	d.wg.Add(1)
 	go func() {
 		defer d.wg.Done()
-		if err := d.primary.Start(gctx); err != nil {
+		if err := d.primary.Start(managersCtx); err != nil {
 			select {
 			case d.errCh <- err:
 			default:
 			}
 		}
-		cancel()
+		managersCtxCancel()
 	}()
 
 	d.wg.Wait()
@@ -221,7 +221,7 @@ func (d *DelegatedManager) Start(ctx context.Context) error {
 }
 
 // applyDelegationOverrides returns opts with all delegation fields overridden.
-func (d *DelegatedManager) applyDelegationOverrides(opts mcmanager.Options, name string) mcmanager.Options {
+func (d *AggregatingManager) applyDelegationOverrides(opts mcmanager.Options, name string) mcmanager.Options {
 	opts.HealthProbeBindAddress = "0"
 	opts.Metrics = metricsserver.Options{BindAddress: "0"}
 	opts.PprofBindAddress = "0"
@@ -261,8 +261,8 @@ func CopyLeaderElectionOptions(dst *mcmanager.Options, src mcmanager.Options) {
 
 // registerSecondary appends mgr to the secondaries list and, if Start has already
 // been called, launches mgr immediately into the running context.
-func (d *DelegatedManager) registerSecondary(mgr mcmanager.Manager, name string) error {
-	s := delegatedSecondary{mgr: mgr, name: name}
+func (d *AggregatingManager) registerSecondary(mgr mcmanager.Manager, name string) error {
+	s := aggregatedSecondary{mgr: mgr, name: name}
 
 	d.mu.Lock()
 	defer d.mu.Unlock()
@@ -295,7 +295,7 @@ func (d *DelegatedManager) registerSecondary(mgr mcmanager.Manager, name string)
 	go func() {
 		defer d.wg.Done()
 		if err := mgr.Start(d.gctx); err != nil && !errors.Is(err, context.Canceled) {
-			d.cancel()
+			d.gcancel()
 			select {
 			case d.errCh <- err:
 			default:
@@ -307,6 +307,6 @@ func (d *DelegatedManager) registerSecondary(mgr mcmanager.Manager, name string)
 }
 
 // SetNewManager replaces d's manager constructor. For testing only.
-func SetNewManager_test(d *DelegatedManager, f func(*rest.Config, multicluster.Provider, mcmanager.Options, ...mcmanager.Option) (mcmanager.Manager, error)) {
+func SetNewManager_test(d *AggregatingManager, f func(*rest.Config, multicluster.Provider, mcmanager.Options, ...mcmanager.Option) (mcmanager.Manager, error)) {
 	d.newManager = f
 }

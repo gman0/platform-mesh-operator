@@ -14,7 +14,7 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-package delegate_test
+package aggregate_test
 
 import (
 	"context"
@@ -28,30 +28,30 @@ import (
 
 	mcmanager "sigs.k8s.io/multicluster-runtime/pkg/manager"
 
-	"github.com/platform-mesh/platform-mesh-operator/internal/manager/delegate"
+	"github.com/platform-mesh/platform-mesh-operator/internal/manager/aggregate"
 )
 
 // ---- helpers ----------------------------------------------------------------
 
-// newDM creates a DelegatedManager backed by a fresh fakeMcManager. The scheme
+// newDM creates a AggregatingManager backed by a fresh fakeMcManager. The scheme
 // is set on the local manager and Options so applyDelegationOverrides copies it
 // via primaryOpts.Scheme.
-func newDM(t *testing.T, scheme *runtime.Scheme) (*delegate.DelegatedManager, *fakeMcManager) {
+func newDM(t *testing.T, scheme *runtime.Scheme) (*aggregate.AggregatingManager, *fakeMcManager) {
 	t.Helper()
 	primary := newFakeMcManager()
 	primary.local.scheme = scheme
-	dm, err := delegate.New(primary, mcmanager.Options{Scheme: scheme})
+	dm, err := aggregate.New(primary, mcmanager.Options{Scheme: scheme})
 	if err != nil {
-		t.Fatalf("delegate.New: %v", err)
+		t.Fatalf("aggregate.New: %v", err)
 	}
 	return dm, primary
 }
 
 // addFake adds a secondary fakeMcManager and returns it.
-func addFake(t *testing.T, dm *delegate.DelegatedManager, name string) *fakeMcManager {
+func addFake(t *testing.T, dm *aggregate.AggregatingManager, name string) *fakeMcManager {
 	t.Helper()
 	sec := newFakeMcManager()
-	_, err := delegate.AddSecondaryWith(dm, name, mcmanager.Options{}, nil,
+	_, err := aggregate.AddSecondaryWith(dm, name, mcmanager.Options{}, nil,
 		func(_ *rest.Config, _ mcmanager.Options) (*fakeMcManager, error) {
 			return sec, nil
 		})
@@ -63,7 +63,7 @@ func addFake(t *testing.T, dm *delegate.DelegatedManager, name string) *fakeMcMa
 
 // startDM launches dm.Start in a goroutine and returns a channel that receives
 // its return value.
-func startDM(t *testing.T, dm *delegate.DelegatedManager, ctx context.Context) <-chan error {
+func startDM(t *testing.T, dm *aggregate.AggregatingManager, ctx context.Context) <-chan error {
 	t.Helper()
 	ch := make(chan error, 1)
 	go func() { ch <- dm.Start(ctx) }()
@@ -74,7 +74,7 @@ func startDM(t *testing.T, dm *delegate.DelegatedManager, ctx context.Context) <
 
 func TestNew_RegistersSentinelAndReadyzCheck(t *testing.T) {
 	primary := newFakeMcManager()
-	dm, err := delegate.New(primary, mcmanager.Options{Scheme: runtime.NewScheme()})
+	dm, err := aggregate.New(primary, mcmanager.Options{Scheme: runtime.NewScheme()})
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
@@ -109,7 +109,7 @@ func TestNew_RegistersSentinelAndReadyzCheck(t *testing.T) {
 func TestNew_AddFails(t *testing.T) {
 	primary := newFakeMcManager()
 	primary.addErr = errors.New("add failed")
-	_, err := delegate.New(primary, mcmanager.Options{})
+	_, err := aggregate.New(primary, mcmanager.Options{})
 	if err == nil {
 		t.Fatal("expected error when primary.Add fails")
 	}
@@ -118,7 +118,7 @@ func TestNew_AddFails(t *testing.T) {
 func TestNew_AddReadyzCheckFails(t *testing.T) {
 	primary := newFakeMcManager()
 	primary.addReadyzCheckErr = errors.New("readyz failed")
-	_, err := delegate.New(primary, mcmanager.Options{})
+	_, err := aggregate.New(primary, mcmanager.Options{})
 	if err == nil {
 		t.Fatal("expected error when primary.AddReadyzCheck fails")
 	}
@@ -128,7 +128,7 @@ func TestNew_AddReadyzCheckFails(t *testing.T) {
 
 func TestPrimary(t *testing.T) {
 	primary := newFakeMcManager()
-	dm, _ := delegate.New(primary, mcmanager.Options{Scheme: runtime.NewScheme()})
+	dm, _ := aggregate.New(primary, mcmanager.Options{Scheme: runtime.NewScheme()})
 	if got := dm.Primary(); got != primary {
 		t.Fatal("Primary() returned unexpected manager")
 	}
@@ -154,13 +154,13 @@ func TestAddSecondaryWith_DelegationOverrides(t *testing.T) {
 		RetryPeriod:                   ptr.To(retryPer),
 		LeaderElectionReleaseOnCancel: true,
 	}
-	dm, err := delegate.New(primary, primaryOpts)
+	dm, err := aggregate.New(primary, primaryOpts)
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
 
 	var capturedOpts mcmanager.Options
-	_, err = delegate.AddSecondaryWith(dm, "sec-1", mcmanager.Options{}, nil,
+	_, err = aggregate.AddSecondaryWith(dm, "sec-1", mcmanager.Options{}, nil,
 		func(_ *rest.Config, opts mcmanager.Options) (*fakeMcManager, error) {
 			capturedOpts = opts
 			return newFakeMcManager(), nil
@@ -211,13 +211,13 @@ func TestAddSecondaryWith_SchemeFromPrimaryGetScheme(t *testing.T) {
 	scheme := primary.local.scheme // set by newFakeMcManager
 
 	// Pass no Scheme in primaryOpts — fallback path.
-	dm, err := delegate.New(primary, mcmanager.Options{})
+	dm, err := aggregate.New(primary, mcmanager.Options{})
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
 
 	var capturedScheme *runtime.Scheme
-	_, err = delegate.AddSecondaryWith(dm, "sec", mcmanager.Options{}, nil,
+	_, err = aggregate.AddSecondaryWith(dm, "sec", mcmanager.Options{}, nil,
 		func(_ *rest.Config, opts mcmanager.Options) (*fakeMcManager, error) {
 			capturedScheme = opts.Scheme
 			return newFakeMcManager(), nil
@@ -234,13 +234,13 @@ func TestAddSecondaryWith_SchemeFromPrimaryGetScheme(t *testing.T) {
 // disabled and must not receive an ElectedGateLock.
 func TestAddSecondaryWith_NoLeaderElection(t *testing.T) {
 	primary := newFakeMcManager()
-	dm, err := delegate.New(primary, mcmanager.Options{LeaderElection: false})
+	dm, err := aggregate.New(primary, mcmanager.Options{LeaderElection: false})
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
 
 	var capturedOpts mcmanager.Options
-	_, err = delegate.AddSecondaryWith(dm, "sec", mcmanager.Options{}, nil,
+	_, err = aggregate.AddSecondaryWith(dm, "sec", mcmanager.Options{}, nil,
 		func(_ *rest.Config, opts mcmanager.Options) (*fakeMcManager, error) {
 			capturedOpts = opts
 			return newFakeMcManager(), nil
@@ -305,7 +305,7 @@ func TestStart_SecondaryError(t *testing.T) {
 	sec := newFakeMcManager()
 	sec.startErr = secErr
 
-	_, err := delegate.AddSecondaryWith(dm, "bad", mcmanager.Options{}, nil,
+	_, err := aggregate.AddSecondaryWith(dm, "bad", mcmanager.Options{}, nil,
 		func(_ *rest.Config, _ mcmanager.Options) (*fakeMcManager, error) {
 			return sec, nil
 		})
@@ -331,7 +331,7 @@ func TestStart_DynamicSecondary(t *testing.T) {
 	waitFor(t, primary.startedCh, "primary Start")
 
 	sec := newFakeMcManager()
-	_, err := delegate.AddSecondaryWith(dm, "dynamic", mcmanager.Options{}, nil,
+	_, err := aggregate.AddSecondaryWith(dm, "dynamic", mcmanager.Options{}, nil,
 		func(_ *rest.Config, _ mcmanager.Options) (*fakeMcManager, error) {
 			return sec, nil
 		})
@@ -368,7 +368,7 @@ func TestStart_AddAfterStop_ReturnsError(t *testing.T) {
 		t.Fatal("Start did not stop")
 	}
 
-	_, err := delegate.AddSecondaryWith(dm, "late", mcmanager.Options{}, nil,
+	_, err := aggregate.AddSecondaryWith(dm, "late", mcmanager.Options{}, nil,
 		func(_ *rest.Config, _ mcmanager.Options) (*fakeMcManager, error) {
 			return newFakeMcManager(), nil
 		})
@@ -397,7 +397,7 @@ func TestStart_AddAfterStop_NoGhost(t *testing.T) {
 	lateSecondary := newFakeMcManager()
 	// lateSecondary.local.fcache is unsynced and lateSecondary.elected is never
 	// closed, so if it ends up in d.secondaries the readyz check will block then fail.
-	_, _ = delegate.AddSecondaryWith(dm, "ghost", mcmanager.Options{}, nil,
+	_, _ = aggregate.AddSecondaryWith(dm, "ghost", mcmanager.Options{}, nil,
 		func(_ *rest.Config, _ mcmanager.Options) (*fakeMcManager, error) {
 			return lateSecondary, nil
 		})

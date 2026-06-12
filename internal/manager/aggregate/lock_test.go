@@ -14,7 +14,7 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-package delegate_test
+package aggregate_test
 
 import (
 	"context"
@@ -24,11 +24,11 @@ import (
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	rl "k8s.io/client-go/tools/leaderelection/resourcelock"
 
-	"github.com/platform-mesh/platform-mesh-operator/internal/manager/delegate"
+	"github.com/platform-mesh/platform-mesh-operator/internal/manager/aggregate"
 )
 
 func TestElectedGateLock_IdentityAndDescribe(t *testing.T) {
-	lock := delegate.LockSecondaryWhenPrimaryElected("my-id", make(chan struct{}), make(chan struct{}))
+	lock := aggregate.LockSecondaryWhenPrimaryElected("my-id", make(chan struct{}), make(chan struct{}))
 
 	if got := lock.Identity(); got != "my-id" {
 		t.Fatalf("Identity = %q, want %q", got, "my-id")
@@ -42,7 +42,7 @@ func TestElectedGateLock_IdentityAndDescribe(t *testing.T) {
 func TestElectedGateLock_BeforeElected(t *testing.T) {
 	elected := make(chan struct{})
 	lost := make(chan struct{})
-	lock := delegate.LockSecondaryWhenPrimaryElected("id", elected, lost)
+	lock := aggregate.LockSecondaryWhenPrimaryElected("id", elected, lost)
 
 	t.Run("Get returns not-found", func(t *testing.T) {
 		rec, raw, err := lock.Get(context.Background())
@@ -71,7 +71,7 @@ func TestElectedGateLock_AfterElected(t *testing.T) {
 	elected := make(chan struct{})
 	lost := make(chan struct{})
 	close(elected)
-	lock := delegate.LockSecondaryWhenPrimaryElected("holder", elected, lost)
+	lock := aggregate.LockSecondaryWhenPrimaryElected("holder", elected, lost)
 
 	t.Run("Get returns owned record with correct identity", func(t *testing.T) {
 		rec, raw, err := lock.Get(context.Background())
@@ -107,7 +107,7 @@ func TestElectedGateLock_AfterLost(t *testing.T) {
 	lost := make(chan struct{})
 	close(elected)
 	close(lost)
-	lock := delegate.LockSecondaryWhenPrimaryElected("id", elected, lost)
+	lock := aggregate.LockSecondaryWhenPrimaryElected("id", elected, lost)
 
 	t.Run("Get returns not-found", func(t *testing.T) {
 		_, _, err := lock.Get(context.Background())
@@ -133,7 +133,7 @@ func TestElectedGateLock_AfterLost(t *testing.T) {
 func TestElectedGateLock_LostWithoutElected(t *testing.T) {
 	lost := make(chan struct{})
 	close(lost)
-	lock := delegate.LockSecondaryWhenPrimaryElected("id", make(chan struct{}), lost)
+	lock := aggregate.LockSecondaryWhenPrimaryElected("id", make(chan struct{}), lost)
 
 	_, _, err := lock.Get(context.Background())
 	if !apierrors.IsNotFound(err) {
