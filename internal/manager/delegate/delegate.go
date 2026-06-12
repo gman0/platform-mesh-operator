@@ -25,7 +25,6 @@ import (
 	"fmt"
 	"time"
 
-	// "net/http"
 	"sync"
 
 	"k8s.io/client-go/rest"
@@ -111,7 +110,6 @@ func New(primary mcmanager.Manager, opts mcmanager.Options) (*DelegatedManager, 
 	if err := primary.AddHealthzCheck("secondaries", healthz.Ping); err != nil {
 		return nil, fmt.Errorf("failed to register healthz check on secondaries: %v", err)
 	}
-	// ^ Expand checks
 
 	return d, nil
 }
@@ -120,7 +118,8 @@ func New(primary mcmanager.Manager, opts mcmanager.Options) (*DelegatedManager, 
 func (d *DelegatedManager) Primary() mcmanager.Manager { return d.primary }
 
 // AddSecondary creates a new manager for cfg with all delegation overrides applied
-// and registers it. May be called before or after Start.
+// and registers it. May be called before or after Start. When Called after Start,
+// secondary's Start is called immediately.
 //
 // Fields overridden unconditionally:
 //
@@ -135,6 +134,8 @@ func (d *DelegatedManager) Primary() mcmanager.Manager { return d.primary }
 //
 //	LeaderElection                      → true
 //	LeaderElectionResourceLockInterface → ElectedGateLock proxy
+//	LeaseDuration / RenewDeadline /
+//	  RetryPeriod / ReleaseOnCancel     → copied from primary opts
 //
 // When primaryOpts.LeaderElection is false, LeaderElection is forced to false on
 // the secondary as well (no LE loop, no proxy lock).
@@ -163,6 +164,10 @@ func (d *DelegatedManager) Start(ctx context.Context) error {
 	gctx, cancel := context.WithCancel(ctx)
 
 	d.mu.Lock()
+	if d.started {
+		d.mu.Unlock()
+		return fmt.Errorf("aggregating manager already started")
+	}
 	d.gctx = gctx
 	d.cancel = cancel
 	d.errCh = make(chan error, 1)
