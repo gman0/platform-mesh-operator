@@ -670,6 +670,15 @@ func (s *DeployTestSuite) TestSplitRegistry() {
 	base, sub = splitRegistry("ghcr.io")
 	s.Equal("ghcr.io", base)
 	s.Equal("", sub)
+	base, sub = splitRegistry("http://kind-registry:5000/ghcr.io/platform-mesh/provider-quickstart/wildwest-operator")
+	s.Equal("http://kind-registry:5000", base)
+	s.Equal("ghcr.io/platform-mesh/provider-quickstart/wildwest-operator", sub)
+	base, sub = splitRegistry("http://")
+	s.Equal("http://", base)
+	s.Equal("", sub)
+	base, sub = splitRegistry("http:///")
+	s.Equal("http://", base)
+	s.Equal("", sub)
 }
 
 // newManagedProviderOCM returns a ManagedProvider with a single self-contained ocm

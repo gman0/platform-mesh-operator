@@ -100,6 +100,13 @@ func ocmDeploymentName(ocm *providersv1alpha1.OCMComponentSpec) string {
 // splitRegistry splits an OCM/OCI registry root (e.g. "ghcr.io/platform-mesh") into the
 // host (baseUrl) and the remaining sub-path for a delivery.ocm.software Repository.
 func splitRegistry(registry string) (baseURL, subPath string) {
+	const schemeSeparator = "://"
+	schemeIdx := strings.Index(registry, "://")
+	if schemeIdx >= 0 {
+		registryWithoutScheme := registry[schemeIdx+len(schemeSeparator):]
+		host, path, _ := strings.Cut(registryWithoutScheme, "/")
+		return registry[:schemeIdx+len(schemeSeparator)] + host, path
+	}
 	baseURL, subPath, _ = strings.Cut(registry, "/")
 	return baseURL, subPath
 }
