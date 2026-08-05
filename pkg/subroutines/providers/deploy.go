@@ -223,14 +223,21 @@ func (r *DeploySubroutine) deployFluxOCI(ctx context.Context, namespace, name st
 	if err != nil {
 		return subroutines.OK(), gcerrors.Wrap(err, "failed to unmarshal values for %s", name)
 	}
-	return r.reconcileResolvedOCIChart(ctx, namespace, name, ociURL, flux.Version, flux.Insecure, values, runtimeKubeconfigSecretName)
+	helmLayerSelector := map[string]interface{}{
+		"mediaType": "application/vnd.cncf.helm.chart.content.v1.tar+gzip",
+		"operation": "copy",
+	}
+	return r.reconcileResolvedOCIChart(ctx, namespace, name, ociURL, flux.Version, flux.Insecure, helmLayerSelector, values, runtimeKubeconfigSecretName)
 }
 
 // reconcileResolvedOCIChart creates/updates a Flux OCIRepository (pointing at the given
 // resolved chart OCI url + tag) and a HelmRelease referencing it via chartRef, then
 // reports readiness. It is shared by the flux OCI path and the ocm path (which first
 // resolves the OCI url + version from an OCM Resource status).
-func (r *DeploySubroutine) reconcileResolvedOCIChart(ctx context.Context, namespace, name, ociURL, version string, insecure bool, values map[string]interface{}, runtimeKubeconfigSecretName string) (subroutines.Result, error) {
+// layerSelector, when non-nil, is set on spec.layerSelector. The Flux OCI path uses
+// the Helm-specific media type; the OCM path passes nil because OCM stores helm chart
+// resources with a different layer format that does not carry that media type.
+func (r *DeploySubroutine) reconcileResolvedOCIChart(ctx context.Context, namespace, name, ociURL, version string, insecure bool, layerSelector map[string]interface{}, values map[string]interface{}, runtimeKubeconfigSecretName string) (subroutines.Result, error) {
 	log := logger.LoadLoggerFromContext(ctx).ChildLogger("subroutine", DeploySubroutineName).ChildLogger("component", name)
 
 	ociRepo := &unstructured.Unstructured{}
@@ -253,10 +260,10 @@ func (r *DeploySubroutine) reconcileResolvedOCIChart(ctx context.Context, namesp
 		if err := unstructured.SetNestedField(ociRepo.Object, insecure, "spec", "insecure"); err != nil {
 			return err
 		}
-		return unstructured.SetNestedMap(ociRepo.Object, map[string]interface{}{
-			"mediaType": "application/vnd.cncf.helm.chart.content.v1.tar+gzip",
-			"operation": "copy",
-		}, "spec", "layerSelector")
+		if layerSelector != nil {
+			return unstructured.SetNestedMap(ociRepo.Object, layerSelector, "spec", "layerSelector")
+		}
+		return nil
 	})
 	if err != nil {
 		return subroutines.OK(), gcerrors.Wrap(err, "failed to reconcile OCIRepository %s/%s", namespace, name)
@@ -341,8 +348,13 @@ func parseOCMValues(ocm *providersv1alpha1.OCMComponentSpec) (map[string]interfa
 // ocmResolvedOCIURL turns an OCM-resolved imageReference (and version) into a clean
 // oci://host/repository URL suitable for a Flux OCIRepository spec.url. Mirrors the
 // resolution done by the PlatformMesh ResourceSubroutine.
+// Plain-HTTP registries store http:// in the imageReference; we normalise to oci://
+// regardless because Flux always uses that scheme (plain-HTTP is enabled via spec.insecure).
 func ocmResolvedOCIURL(imageRef, version string) (string, error) {
-	url := "oci://" + strings.TrimPrefix(imageRef, "oci://")
+	if i := strings.Index(imageRef, "://"); i >= 0 {
+		imageRef = imageRef[i+3:]
+	}
+	url := "oci://" + imageRef
 	url = strings.TrimSuffix(url, ":"+version)
 	spec, err := ocm.ParseRef(url)
 	if err != nil {
@@ -494,7 +506,10 @@ func (r *DeploySubroutine) deployOCMComponent(ctx context.Context, namespace, na
 		return subroutines.OK(), gcerrors.Wrap(err, "failed to unmarshal values for %s", name)
 	}
 
-	return r.reconcileResolvedOCIChart(ctx, namespace, name, ociURL, version, ocmSpec.Insecure, values, runtimeKubeconfigSecretName)
+	// Treat the resolved artifact as insecure if the user set insecure: true OR if the
+	// OCM controller stored an http:// imageReference (plain-HTTP registry).
+	insecure := ocmSpec.Insecure || strings.HasPrefix(imageRef, "http://")
+	return r.reconcileResolvedOCIChart(ctx, namespace, name, ociURL, version, insecure, nil, values, runtimeKubeconfigSecretName)
 }
 
 // deployFluxHelmRepo deploys a chart from a classic HTTP(S) Helm repository via a
