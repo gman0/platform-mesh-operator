@@ -509,7 +509,11 @@ func (r *DeploySubroutine) deployOCMComponent(ctx context.Context, namespace, na
 	// Treat the resolved artifact as insecure if the user set insecure: true OR if the
 	// OCM controller stored an http:// imageReference (plain-HTTP registry).
 	insecure := ocmSpec.Insecure || strings.HasPrefix(imageRef, "http://")
-	return r.reconcileResolvedOCIChart(ctx, namespace, name, ociURL, version, insecure, nil, values, runtimeKubeconfigSecretName)
+	ocmLayerSelector := map[string]interface{}{
+		"mediaType": "application/vnd.cncf.helm.chart.content.v1.tar+gzip",
+		"operation": "copy",
+	}
+	return r.reconcileResolvedOCIChart(ctx, namespace, name, ociURL, version, insecure, ocmLayerSelector, values, runtimeKubeconfigSecretName)
 }
 
 // deployFluxHelmRepo deploys a chart from a classic HTTP(S) Helm repository via a
